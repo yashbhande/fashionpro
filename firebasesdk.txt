@@ -1,0 +1,54 @@
+
+Use npm
+
+
+
+
+
+
+
+-------------------------------------------------------------
+const firebaseConfig = {
+    apiKey: "AIzaSyDQvdmMYRsoBZlZ1AvUQyBqBD1EXs5QM48",
+    authDomain: "fashionpro-db.firebaseapp.com",
+    projectId: "fashionpro-db",
+    storageBucket: "fashionpro-db.firebasestorage.app",
+    messagingSenderId: "698289947835",
+    appId: "1:698289947835:web:ee8fad3a2ea6dd73aed59e"
+  };
+---------------------------------------------------------------
+
+
+
+
+
+Use a <script> tag
+If you're already using npm and a module bundler such as webpack or Rollup, you can run the following command to install the latest SDK (Learn more):
+
+-------------------------------------------------------------------
+
+npm install firebase
+-------------------------------------------------------------------
+
+
+Then, initialize Firebase and begin using the SDKs for the products you'd like to use.
+
+-------------------------------------------------------------------
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyDQvdmMYRsoBZlZ1AvUQyBqBD1EXs5QM48",
+  authDomain: "fashionpro-db.firebaseapp.com",
+  projectId: "fashionpro-db",
+  storageBucket: "fashionpro-db.firebasestorage.app",
+  messagingSenderId: "698289947835",
+  appId: "1:698289947835:web:ee8fad3a2ea6dd73aed59e"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+-------------------------------------------------------------------

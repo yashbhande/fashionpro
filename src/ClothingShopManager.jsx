@@ -1739,7 +1739,6 @@ const BillHistory = ({ sales, setSales, products, setProducts, customers, setCus
 
   const totalAmt = filtered.reduce((a, s) => a + getCurrentVersion(s).total, 0);
   const totalDisc = filtered.reduce((a, s) => { const v = getCurrentVersion(s); return a + (v.discount||0); }, 0);
-  const vTypeLabel = { original: { text: "Original", color: "#6b7280" }, replace: { text: "🔄 Replaced", color: "#d97706" }, return: { text: "↩️ Returned", color: "#dc2626" } };
 
   return (
     <div className="page">
@@ -2183,7 +2182,6 @@ const generatePDFBlob = async (bill, shopName) => {
 
   const totalPcs      = itemData.reduce((a, d) => a + d.qty, 0);
   const pdfMRPTotal   = itemData.reduce((a, d) => a + d.mrpTotal, 0);
-  const pdfRateTotal  = itemData.reduce((a, d) => a + d.rateTotal, 0);
   const mrpSavings    = itemData.reduce((a, d) => a + d.mrpSaveAmt, 0);
   const settledInPdf  = itemData.reduce((a, d) => a + d.settled, 0);
   // BUG6 FIX: itemDiscTotal mein settled double count ho raha tha — hatao
@@ -4395,7 +4393,6 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
                 const s = calcBillSummary(showInvoice);
                 const mrpTotal = s.mrpSubtotal > 0 ? s.mrpSubtotal : showInvoice.total;
                 const totalDiscount = s.mrpDiscount + s.itemDiscTotal + s.billDiscAmt + s.legacyDisc + s.settledTotal;
-                const savedPct = mrpTotal > 0 ? Math.round(totalDiscount / mrpTotal * 100) : 0;
                 return (
                   <div style={{ marginTop: 14, paddingTop: 12, borderTop: "2px solid #e5e7eb" }}>
                     {/* MRP Total */}
