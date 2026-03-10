@@ -728,9 +728,9 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
                     )}
                   </div>
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:6, marginBottom:10 }}>
-                    <div><label className="label">Price ₹ *</label><input className="input" type="number" value={replaceNewPrice} onChange={e=>setReplaceNewPrice(e.target.value)} placeholder="0" /></div>
-                    <div><label className="label">Qty</label><input className="input" type="number" value={replaceNewQty} onChange={e=>setReplaceNewQty(e.target.value)} placeholder="1" /></div>
-                    <div><label className="label">Item Disc ₹</label><input className="input" type="number" value={replaceItemDisc} onChange={e=>setReplaceItemDisc(e.target.value)} placeholder="0" /></div>
+                    <div><label className="label">Price ₹ *</label><input className="input" type="number" onWheel={e=>e.target.blur()} value={replaceNewPrice} onChange={e=>setReplaceNewPrice(e.target.value)} placeholder="0" /></div>
+                    <div><label className="label">Qty</label><input className="input" type="number" onWheel={e=>e.target.blur()} value={replaceNewQty} onChange={e=>setReplaceNewQty(e.target.value)} placeholder="1" /></div>
+                    <div><label className="label">Item Disc ₹</label><input className="input" type="number" onWheel={e=>e.target.blur()} value={replaceItemDisc} onChange={e=>setReplaceItemDisc(e.target.value)} placeholder="0" /></div>
                     <div><label className="label">Size</label><input className="input" value={replaceNewSize} onChange={e=>setReplaceNewSize(e.target.value)} placeholder="M" /></div>
                   </div>
                   {diff !== null && (
@@ -851,7 +851,8 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
             {/* ── Net Savings ── */}
             {(() => {
               const s = calcBillSummary(cv);
-              const netSavings = s.totalSavings + origShortfall;
+              // totalSavings ab settledTotal include karta hai — origShortfall alag add nahi karo
+              const netSavings = s.totalSavings;
               if (netSavings <= 0) return null;
               return (
                 <div style={{ background:"#f0fdf4", border:"1px solid #86efac", borderRadius:10, padding:"10px 14px", marginTop:4 }}>
@@ -870,7 +871,7 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
                   )}
                   {s.billDiscAmt > 0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12 }}><span>Bill discount</span><span style={{ color:"#7c3aed", fontWeight:700 }}>−₹{s.billDiscAmt}</span></div>}
                   {s.legacyDisc > 0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12 }}><span>Discount</span><span style={{ color:"#059669", fontWeight:700 }}>−₹{s.legacyDisc}</span></div>}
-                  {origShortfall > 0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12 }}><span>Original bill shortfall</span><span style={{ color:"#f59e0b", fontWeight:700 }}>−₹{origShortfall}</span></div>}
+                  {s.settledTotal > 0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12 }}><span>Less kiya (extra bachat)</span><span style={{ color:"#15803d", fontWeight:700 }}>−₹{s.settledTotal}</span></div>}
                   <div style={{ borderTop:"1px dashed #86efac", marginTop:6, paddingTop:6, display:"flex", justifyContent:"space-between", fontSize:13, fontWeight:800, color:"#15803d" }}>
                     <span>Total Bachaya</span><span>−₹{netSavings}</span>
                   </div>
@@ -1634,10 +1635,8 @@ const calcBillSummary = (billOrVersion) => {
   const taxAmt = billOrVersion.tax || 0;
   const total = billOrVersion.total || 0;
   const received = billOrVersion.received ?? total;
-  // BUG4 FIX: totalSavings = sirf actual discounts (mrp + item + bill)
-  // settledTotal is NOT a saving — it's just "customer ne kam diya"
-  // Pehle settledTotal bhi add hota tha — double count hota tha
-  const totalSavings = mrpDiscount + itemDiscTotal + billDiscAmt + legacyDisc;
+  // totalSavings = mrp discount + item discount + bill discount + settled (customer ne kam diya = uski bachat)
+  const totalSavings = mrpDiscount + itemDiscTotal + billDiscAmt + legacyDisc + settledTotal;
   const totalDiscount = itemDiscTotal + billDiscAmt + legacyDisc;
   return { items, mrpSubtotal, rateSubtotal, mrpDiscount, itemDiscTotal,
            billDiscAmt, legacyDisc, settledTotal, totalDiscount, taxAmt,
@@ -1790,9 +1789,9 @@ const BillHistory = ({ sales, setSales, products, setProducts, customers, setCus
             ))}
           </div>
           {/* Amount range */}
-          <input type="number" className="input" value={minAmt} onChange={e=>setMinAmt(e.target.value)} placeholder="Min ₹" style={{ width:78, padding:"4px 8px", fontSize:12 }} />
+          <input type="number" onWheel={e=>e.target.blur()} className="input" value={minAmt} onChange={e=>setMinAmt(e.target.value)} placeholder="Min ₹" style={{ width:78, padding:"4px 8px", fontSize:12 }} />
           <span style={{ fontSize:12, color:"#9ca3af" }}>—</span>
-          <input type="number" className="input" value={maxAmt} onChange={e=>setMaxAmt(e.target.value)} placeholder="Max ₹" style={{ width:78, padding:"4px 8px", fontSize:12 }} />
+          <input type="number" onWheel={e=>e.target.blur()} className="input" value={maxAmt} onChange={e=>setMaxAmt(e.target.value)} placeholder="Max ₹" style={{ width:78, padding:"4px 8px", fontSize:12 }} />
           {/* Sort */}
           <select className="select" value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{ padding:"4px 8px", fontSize:12, width:"auto", marginLeft:4 }}>
             <option value="date_desc">📅 Date ↓ (Latest)</option>
@@ -2189,9 +2188,8 @@ const generatePDFBlob = async (bill, shopName) => {
   const itemDiscTotal = itemData.reduce((a, d) => a + d.iDiscRs, 0);
   const billDiscAmt   = bill.billDiscount || 0;
   const legacyDisc    = (!bill.itemDiscountTotal && !bill.billDiscount && bill.discount) ? Math.max(0, bill.discount - settledInPdf) : 0;
-  // BUG6 FIX: totalSavings = mrpSavings + itemDisc + billDisc only (same as calcBillSummary)
-  // Pehle settledInPdf bhi add hota tha — double count tha
-  const totalSavings  = mrpSavings + itemDiscTotal + billDiscAmt + legacyDisc;
+  // totalSavings = mrpSavings + itemDisc + billDisc + settled (customer ne kam diya = uski bachat)
+  const totalSavings  = mrpSavings + itemDiscTotal + billDiscAmt + legacyDisc + settledInPdf;
   const totalPayable  = bill.total || 0;
   // BUG6 FIX: received sahi dikhao — bill.received use karo, fallback totalPayable
   const received      = bill.received ?? totalPayable;
@@ -2378,8 +2376,8 @@ const generatePDFBlob = async (bill, shopName) => {
     y += 6;
   }
 
-  // ── SAVINGS — MRP se total kitna bacha, sirf ₹ (no %) ──
-  const mrpBasedSavingPDF = pdfMRPTotal > 0 ? pdfMRPTotal - received : totalSavings;
+  // ── SAVINGS — totalSavings ab settled bhi include karta hai ──
+  const mrpBasedSavingPDF = totalSavings;
   if (mrpBasedSavingPDF > 0) {
     line(3, y - 1, W - 3, y - 1);
     y += 3;
@@ -2511,8 +2509,8 @@ const BillActions = ({ bill, shopName, onClose, showNewBill }) => {
     const totalSaved = bSummary.totalSavings; // mrpDiscount + itemDiscTotal + billDiscAmt
     const receivedAmt = bill.received ?? bill.total;
 
-    // MRP se kitna total bacha — customer ke liye most meaningful number
-    const mrpBasedSaving = bSummary.mrpSubtotal > 0 ? bSummary.mrpSubtotal - receivedAmt : totalSaved;
+    // totalSavings ab settled bhi include karta hai — sabse sahi number
+    const mrpBasedSaving = totalSaved;
 
     if (bSummary.mrpSubtotal > 0) {
       t += `MRP Total: Rs.${bSummary.mrpSubtotal.toLocaleString()}\n`;
@@ -3145,11 +3143,11 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
                       <div key={i}>
                         <div style={{ display: "grid", gridTemplateColumns: "72px 1fr 90px 70px 1fr 72px 28px", gap: 5, marginBottom: 2, alignItems: "center" }}>
                           <input className="input" value={sv.size} onChange={e => updateVariant(i, "size", e.target.value)} placeholder="60" style={{ textAlign: "center", fontWeight: 700, padding: "6px 4px" }} />
-                          <input className="input" type="number" value={sv.purchasePrice} onChange={e => updateVariant(i, "purchasePrice", e.target.value)} placeholder="₹" style={{ padding: "6px 4px" }} />
-                          <input className="input" type="number" value={sv.mrp} onChange={e => updateVariant(i, "mrp", e.target.value)} placeholder="336" style={{ padding: "6px 4px" }} />
-                          <input className="input" type="number" value={sv.piecesPerBox || ""} onChange={e => updateVariant(i, "piecesPerBox", e.target.value)} placeholder="2" style={{ padding: "6px 4px", textAlign: "center" }} />
-                          <input className="input" type="number" value={sv.sellingPrice} onChange={e => updateVariant(i, "sellingPrice", e.target.value)} placeholder="₹ *" style={{ padding: "6px 4px", border: !sv.sellingPrice ? "1.5px solid #fca5a5" : undefined }} />
-                          <input className="input" type="number" value={sv.stock} onChange={e => updateVariant(i, "stock", e.target.value)} placeholder="0" style={{ padding: "6px 4px", textAlign: "center" }} />
+                          <input className="input" type="number" onWheel={e=>e.target.blur()} value={sv.purchasePrice} onChange={e => updateVariant(i, "purchasePrice", e.target.value)} placeholder="₹" style={{ padding: "6px 4px" }} />
+                          <input className="input" type="number" onWheel={e=>e.target.blur()} value={sv.mrp} onChange={e => updateVariant(i, "mrp", e.target.value)} placeholder="336" style={{ padding: "6px 4px" }} />
+                          <input className="input" type="number" onWheel={e=>e.target.blur()} value={sv.piecesPerBox || ""} onChange={e => updateVariant(i, "piecesPerBox", e.target.value)} placeholder="2" style={{ padding: "6px 4px", textAlign: "center" }} />
+                          <input className="input" type="number" onWheel={e=>e.target.blur()} value={sv.sellingPrice} onChange={e => updateVariant(i, "sellingPrice", e.target.value)} placeholder="₹ *" style={{ padding: "6px 4px", border: !sv.sellingPrice ? "1.5px solid #fca5a5" : undefined }} />
+                          <input className="input" type="number" onWheel={e=>e.target.blur()} value={sv.stock} onChange={e => updateVariant(i, "stock", e.target.value)} placeholder="0" style={{ padding: "6px 4px", textAlign: "center" }} />
                           <button onClick={() => removeVariantRow(i)} disabled={form.sizeVariants.length === 1}
                             style={{ background: "none", border: "none", cursor: form.sizeVariants.length === 1 ? "not-allowed" : "pointer", color: "#ef4444", fontSize: 18, lineHeight: 1, opacity: form.sizeVariants.length === 1 ? 0.3 : 1 }}>×</button>
                         </div>
@@ -3185,20 +3183,20 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
                     </div>
                   </div>
                   <div className="form-row form-row-3">
-                    <div><label className="label">Purchase Price ₹</label><input className="input" type="number" value={form.purchasePrice} onChange={e => setForm({ ...form, purchasePrice: e.target.value })} placeholder="450" /></div>
-                    <div><label className="label">Selling Price ₹ *</label><input className="input" type="number" value={form.sellingPrice} onChange={e => setForm({ ...form, sellingPrice: e.target.value })} placeholder="120" /></div>
-                    <div><label className="label">Quantity *</label><input className="input" type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} placeholder="50" /></div>
+                    <div><label className="label">Purchase Price ₹</label><input className="input" type="number" onWheel={e=>e.target.blur()} value={form.purchasePrice} onChange={e => setForm({ ...form, purchasePrice: e.target.value })} placeholder="450" /></div>
+                    <div><label className="label">Selling Price ₹ *</label><input className="input" type="number" onWheel={e=>e.target.blur()} value={form.sellingPrice} onChange={e => setForm({ ...form, sellingPrice: e.target.value })} placeholder="120" /></div>
+                    <div><label className="label">Quantity *</label><input className="input" type="number" onWheel={e=>e.target.blur()} value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} placeholder="50" /></div>
                   </div>
                   <div style={{ background: "#faf5ff", border: "1.5px solid #e9d5ff", borderRadius: 12, padding: "14px 16px" }}>
                     <p style={{ fontSize: 12.5, fontWeight: 700, color: "#7c3aed", marginBottom: 10 }}>📦 Pack / MRP Info (optional)</p>
                     <div className="form-row form-row-2">
                       <div>
                         <label className="label">Company MRP ₹ (box/pack ka)</label>
-                        <input className="input" type="number" value={form.mrp} onChange={e => setForm({ ...form, mrp: e.target.value })} placeholder="e.g. 336" />
+                        <input className="input" type="number" onWheel={e=>e.target.blur()} value={form.mrp} onChange={e => setForm({ ...form, mrp: e.target.value })} placeholder="e.g. 336" />
                       </div>
                       <div>
                         <label className="label">Ek Pack mein kitne Piece</label>
-                        <input className="input" type="number" value={form.piecesPerPack} onChange={e => setForm({ ...form, piecesPerPack: e.target.value })} placeholder="2" min="1" />
+                        <input className="input" type="number" onWheel={e=>e.target.blur()} value={form.piecesPerPack} onChange={e => setForm({ ...form, piecesPerPack: e.target.value })} placeholder="2" min="1" />
                       </div>
                     </div>
                     {form.mrp > 0 && form.piecesPerPack > 0 && form.sellingPrice > 0 && (
@@ -3685,11 +3683,11 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
             </div>
             <div>
               <label className="label">Rate ₹ *</label>
-              <input className="input" type="number" value={quickPrice} onChange={e => setQuickPrice(e.target.value)} placeholder="0" onKeyDown={e => e.key === "Enter" && addToCart()} />
+              <input className="input" type="number" onWheel={e=>e.target.blur()} value={quickPrice} onChange={e => setQuickPrice(e.target.value)} placeholder="0" onKeyDown={e => e.key === "Enter" && addToCart()} />
             </div>
             <div>
               <label className="label">Qty</label>
-              <input className="input" type="number" min="1" value={quickQty} onChange={e => setQuickQty(e.target.value)} onKeyDown={e => e.key === "Enter" && addToCart()} />
+              <input className="input" type="number" onWheel={e=>e.target.blur()} min="1" value={quickQty} onChange={e => setQuickQty(e.target.value)} onKeyDown={e => e.key === "Enter" && addToCart()} />
             </div>
             <div>
               <label className="label">Size <span style={{ color: "#d1d5db", fontWeight: 400 }}>(opt.)</span></label>
@@ -3787,13 +3785,13 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
                           if (item.qty > 1) setCart(prev => prev.map((it,j) => j===i ? {...it, qty: it.qty-1} : it));
                           else setCart(prev => prev.filter((_,j) => j!==i));
                         }} style={{ width: 36, height: 36, borderRadius: 8, border: "1.5px solid #e5e7eb", background: "white", cursor: "pointer", fontWeight: 700, fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center" }}>−</button>
-                        <input type="number" min="1" value={item.qty} onChange={e => setCart(prev => prev.map((it,j) => j===i ? {...it, qty: Math.max(1, +e.target.value)} : it))} style={{ width: 48, height: 36, textAlign: "center", border: "1.5px solid #e5e7eb", borderRadius: 8, padding: "3px 0", fontWeight: 700, fontSize: 15 }} />
+                        <input type="number" onWheel={e=>e.target.blur()} min="1" value={item.qty} onChange={e => setCart(prev => prev.map((it,j) => j===i ? {...it, qty: Math.max(1, +e.target.value)} : it))} style={{ width: 48, height: 36, textAlign: "center", border: "1.5px solid #e5e7eb", borderRadius: 8, padding: "3px 0", fontWeight: 700, fontSize: 15 }} />
                         <button onClick={() => setCart(prev => prev.map((it,j) => j===i ? {...it, qty: it.qty+1} : it))} style={{ width: 36, height: 36, borderRadius: 8, border: "1.5px solid #e5e7eb", background: "white", cursor: "pointer", fontWeight: 700, fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
                       </div>
                     </td>
                     <td>
                       <div>
-                        <input type="number" value={item.price} onChange={e => setCart(prev => prev.map((it,j) => j===i ? {...it, price: +e.target.value} : it))} style={{ width: 70, border: "1.5px solid #e5e7eb", borderRadius: 6, padding: "4px 8px", fontWeight: 600 }} />
+                        <input type="number" onWheel={e=>e.target.blur()} value={item.price} onChange={e => setCart(prev => prev.map((it,j) => j===i ? {...it, price: +e.target.value} : it))} style={{ width: 70, border: "1.5px solid #e5e7eb", borderRadius: 6, padding: "4px 8px", fontWeight: 600 }} />
                         {/* MRP per piece info */}
                         {item.mrpPerPiece > 0 && (
                           <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2, textDecoration: "line-through" }}>
@@ -3828,7 +3826,7 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
                           // TARGET PRICE MODE
                           <div>
                             <input
-                              type="number" min="0"
+                              type="number" onWheel={e=>e.target.blur()} min="0"
                               value={item.itemDiscount || ""}
                               onChange={e => setCart(prev => prev.map((it,j) => j===i ? {...it, itemDiscount:+e.target.value||0} : it))}
                               placeholder={`max ₹${item.price * item.qty}`}
@@ -3855,7 +3853,7 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
                           // ₹ or % mode
                           <div>
                             <input
-                              type="number" min="0"
+                              type="number" onWheel={e=>e.target.blur()} min="0"
                               max={(item.itemDiscountType||"₹")==="%" ? 100 : undefined}
                               value={item.itemDiscount || ""}
                               onChange={e => setCart(prev => prev.map((it,j) => j===i ? {...it, itemDiscount:+e.target.value||0} : it))}
@@ -3998,7 +3996,7 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
                     <button key={t} onClick={() => { setDiscountType(t); setDiscountVal(""); }} style={{ padding: "8px 14px", border: "none", background: discountType === t ? "linear-gradient(135deg,#7c3aed,#a855f7)" : "white", color: discountType === t ? "white" : "#6b7280", fontWeight: 700, cursor: "pointer", fontSize: 14, transition: "all 0.2s" }}>{t}</button>
                   ))}
                 </div>
-                <input className="input" type="number" value={discountVal} onChange={e => setDiscountVal(e.target.value)} placeholder={discountType === "%" ? "e.g. 10" : "e.g. 50"} />
+                <input className="input" type="number" onWheel={e=>e.target.blur()} value={discountVal} onChange={e => setDiscountVal(e.target.value)} placeholder={discountType === "%" ? "e.g. 10" : "e.g. 50"} />
               </div>
               {discountVal && subtotalEligibleForBillDisc > 0 && (
                 <div style={{ fontSize: 12, color: "#7c3aed", fontWeight: 600, marginTop: 4 }}>
@@ -4009,7 +4007,7 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
             </div>
             <div>
               <label className="label">GST % (Optional)</label>
-              <input className="input" type="number" value={tax} onChange={e => setTax(e.target.value)} placeholder="e.g. 5 ya 18" />
+              <input className="input" type="number" onWheel={e=>e.target.blur()} value={tax} onChange={e => setTax(e.target.value)} placeholder="e.g. 5 ya 18" />
             </div>
           </div>
         </div>
@@ -4088,7 +4086,7 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
             <label className="label" style={{ color: "#7c3aed" }}>💰 Received Amount <span style={{ fontWeight:400, color:"#9ca3af" }}>(customer ne diya)</span></label>
             <input
               className="input"
-              type="number"
+              type="number" onWheel={e=>e.target.blur()}
               value={receivedAmt}
               onChange={e => setReceivedAmt(e.target.value)}
               placeholder={`₹${afterDiscountTax.toLocaleString()} (full amount)`}
@@ -4105,11 +4103,11 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
           {(() => {
             const mrpItems = cart.filter(it => it.mrpPerPiece > 0 && it.mrpPerPiece > it.price);
             const mrpSavingsTotal = mrpItems.reduce((a, it) => a + (it.mrpPerPiece - it.price) * it.qty, 0);
-            // BUG4 FIX: extraDiscount (customer ne kam diya) savings mein count nahi hoga
-            const hasAnyDiscount = itemDiscountTotal > 0 || discountAmt > 0 || mrpSavingsTotal > 0;
-            if (!hasAnyDiscount && extraDiscount === 0) return null;
-            // BUG4 FIX: totalAllSavings = sirf actual discounts, not extraDiscount
-            const totalAllSavings = mrpSavingsTotal + itemDiscountTotal + discountAmt;
+            // extraDiscount (customer ne kam diya) = uski bachat bhi hai
+            const hasAnyDiscount = itemDiscountTotal > 0 || discountAmt > 0 || mrpSavingsTotal > 0 || extraDiscount > 0;
+            if (!hasAnyDiscount) return null;
+            // totalAllSavings = actual discounts + extraDiscount (settled amount)
+            const totalAllSavings = mrpSavingsTotal + itemDiscountTotal + discountAmt + extraDiscount;
             return (
               <div style={{ background: "#f0fdf4", border: "1.5px solid #86efac", borderRadius: 12, padding: "12px 14px", marginBottom: 10 }}>
                 <p style={{ fontSize: 11, fontWeight: 800, color: "#15803d", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>💰 Customer ki Total Savings</p>
@@ -4147,8 +4145,8 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
                   )}
                   {extraDiscount > 0 && (
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "#374151" }}>
-                      <span>⚠️ Shortfall (kam mila — discount nahi)</span>
-                      <span style={{ fontWeight: 700, color: "#f59e0b" }}>−₹{extraDiscount.toLocaleString()}</span>
+                      <span>Less kiya (extra bachat)</span>
+                      <span style={{ fontWeight: 700, color: "#15803d" }}>−₹{extraDiscount.toLocaleString()}</span>
                     </div>
                   )}
                   <div style={{ borderTop: "1.5px dashed #86efac", paddingTop: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -4238,7 +4236,7 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
                           <div style={{ textAlign:"right", minWidth:60 }}>
                             <div style={{ fontSize:10, color:"#6b7280", marginBottom:2 }}>Less karo ₹</div>
                             <input
-                              type="number" min="0" max={afterDisc}
+                              type="number" onWheel={e=>e.target.blur()} min="0" max={afterDisc}
                               value={mySettle || ""}
                               onChange={e => {
                                 const v = Math.max(0, Math.min(+e.target.value || 0, afterDisc));
@@ -4429,18 +4427,14 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
                         <span>₹{(s.total - s.received).toLocaleString()}</span>
                       </div>
                     )}
-                    {/* You Saved badge — MRP se total kitna bacha, sirf ₹ amount */}
-                    {(() => {
-                      const paidAmt = s.received ?? s.total;
-                      const mrpSaving = s.mrpSubtotal > 0 ? s.mrpSubtotal - paidAmt : totalDiscount;
-                      return mrpSaving > 0 ? (
+                    {/* You Saved badge — totalSavings ab settled bhi include karta hai */}
+                    {s.totalSavings > 0 ? (
                         <div style={{ marginTop: 10, background: "linear-gradient(135deg,#ecfdf5,#d1fae5)", border: "1.5px solid #6ee7b7", borderRadius: 10, padding: "8px 14px", textAlign: "center" }}>
                           <span style={{ fontSize: 13.5, fontWeight: 800, color: "#065f46" }}>
-                            🎉 You Saved: ₹{mrpSaving.toLocaleString()}
+                            🎉 You Saved: ₹{s.totalSavings.toLocaleString()}
                           </span>
                         </div>
-                      ) : null;
-                    })()}
+                      ) : null}
                   </div>
                 );
               })()}
@@ -4726,7 +4720,7 @@ const Purchases = ({ purchases, setPurchases, products, setProducts, showToast }
               <div className="form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
                 <div>
                   <label className="label">Purchase Price ₹ *</label>
-                  <input className="input" type="number" value={form.purchasePrice} onChange={e => setForm({ ...form, purchasePrice: e.target.value })} placeholder="450" />
+                  <input className="input" type="number" onWheel={e=>e.target.blur()} value={form.purchasePrice} onChange={e => setForm({ ...form, purchasePrice: e.target.value })} placeholder="450" />
                   {matchedProduct && +form.purchasePrice !== matchedProduct.purchasePrice && form.purchasePrice && (
                     <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 3, fontWeight: 600 }}>
                       Pehle: ₹{matchedProduct.purchasePrice} → Ab: ₹{form.purchasePrice}
@@ -4735,14 +4729,14 @@ const Purchases = ({ purchases, setPurchases, products, setProducts, showToast }
                 </div>
                 <div>
                   <label className="label">MRP ₹ <span style={{ color: "#9ca3af", fontWeight: 400 }}>(optional)</span></label>
-                  <input className="input" type="number" value={form.mrp || ""} onChange={e => setForm({ ...form, mrp: e.target.value })} placeholder="e.g. 336" />
+                  <input className="input" type="number" onWheel={e=>e.target.blur()} value={form.mrp || ""} onChange={e => setForm({ ...form, mrp: e.target.value })} placeholder="e.g. 336" />
                   {matchedProduct && matchedProduct.mrp > 0 && (
                     <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 3 }}>Pehle: ₹{matchedProduct.mrp}</div>
                   )}
                 </div>
                 <div>
                   <label className="label">Selling Price ₹</label>
-                  <input className="input" type="number" value={form.sellingPrice} onChange={e => setForm({ ...form, sellingPrice: e.target.value })} placeholder="899" />
+                  <input className="input" type="number" onWheel={e=>e.target.blur()} value={form.sellingPrice} onChange={e => setForm({ ...form, sellingPrice: e.target.value })} placeholder="899" />
                   {matchedProduct && +form.sellingPrice !== matchedProduct.sellingPrice && form.sellingPrice && (
                     <div style={{ fontSize: 11, color: "#059669", marginTop: 3, fontWeight: 600 }}>
                       Pehle: ₹{matchedProduct.sellingPrice} → Ab: ₹{form.sellingPrice}
@@ -4751,7 +4745,7 @@ const Purchases = ({ purchases, setPurchases, products, setProducts, showToast }
                 </div>
                 <div>
                   <label className="label">Quantity *</label>
-                  <input className="input" type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} placeholder="50" />
+                  <input className="input" type="number" onWheel={e=>e.target.blur()} value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} placeholder="50" />
                 </div>
               </div>
 
@@ -5464,9 +5458,9 @@ const Reports = ({ sales, products, purchases, customers, setGlobalInvoiceSale }
           {/* Row 3: Amount range + Sort */}
           <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
             <span style={{ fontSize:11, fontWeight:700, color:"#9ca3af" }}>Amount:</span>
-            <input className="input" type="number" value={minAmount} onChange={e=>setMinAmount(e.target.value)} placeholder="Min ₹" style={{ width:90, padding:"5px 8px", fontSize:12 }} />
+            <input className="input" type="number" onWheel={e=>e.target.blur()} value={minAmount} onChange={e=>setMinAmount(e.target.value)} placeholder="Min ₹" style={{ width:90, padding:"5px 8px", fontSize:12 }} />
             <span style={{ fontSize:12, color:"#9ca3af" }}>—</span>
-            <input className="input" type="number" value={maxAmount} onChange={e=>setMaxAmount(e.target.value)} placeholder="Max ₹" style={{ width:90, padding:"5px 8px", fontSize:12 }} />
+            <input className="input" type="number" onWheel={e=>e.target.blur()} value={maxAmount} onChange={e=>setMaxAmount(e.target.value)} placeholder="Max ₹" style={{ width:90, padding:"5px 8px", fontSize:12 }} />
             <span style={{ fontSize:11, fontWeight:700, color:"#9ca3af", marginLeft:8 }}>Sort:</span>
             <select className="select" value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{ padding:"5px 8px", fontSize:12, width:"auto" }}>
               <option value="date_desc">Date ↓ (Latest first)</option>
@@ -7144,7 +7138,7 @@ const Settings = ({ shopName, setShopName, showToast, sales, products, purchases
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div>
               <label className="label">Low Stock Alert Threshold</label>
-              <input className="input" type="number" value={lowStockThreshold} onChange={e => setLowStockThreshold(+e.target.value)} />
+              <input className="input" type="number" onWheel={e=>e.target.blur()} value={lowStockThreshold} onChange={e => setLowStockThreshold(+e.target.value)} />
               <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 5 }}>Show alert when stock falls below this number</p>
             </div>
             <div style={{ background: "#f9fafb", borderRadius: 12, padding: 16 }}>
