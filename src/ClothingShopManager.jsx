@@ -2381,14 +2381,14 @@ const generatePDFBlob = async (bill, shopName) => {
   if (mrpBasedSavingPDF > 0) {
     line(3, y - 1, W - 3, y - 1);
     y += 3;
-    black(); center(`** Aapki Bachat: Rs.${fmtN(mrpBasedSavingPDF)} **`, y, 7.5, true);
+    black(); center(`** You Saved: Rs.${fmtN(mrpBasedSavingPDF)} **`, y, 7.5, true);
     y += 5;
   }
 
   // ── FOOTER ──
   line(3, y, W - 3, y, true);
   y += 5;
-  lgray(); center("Shukriya! Dobara padharo.", y, 7, false);
+  lgray(); center("Thank You, Visit Again :)", y, 7, false);
   y += 4;
   black(); center(SHOP_NAME, y, 8, true);
 
@@ -2518,10 +2518,10 @@ const BillActions = ({ bill, shopName, onClose, showNewBill }) => {
     if (totalSaved > 0) {
       t += `Total Discount: -Rs.${totalSaved.toLocaleString()}\n`;
     }
-    t += `*TOTAL PAID: Rs.${receivedAmt.toLocaleString()}*`;
+    t += `*TOTAL PAID: Rs.${receivedAmt.toLocaleString()}\n*`;
     if (mrpBasedSaving > 0) {
       // Sirf rupees — no percentage (user request)
-      t += `\nAapki Bachat: Rs.${mrpBasedSaving.toLocaleString()}`;
+      t += `\nYou Saved: Rs.${mrpBasedSaving.toLocaleString()}`;
     }
 
     // BUG6 FIX: partial payment — balance bhi dikhao
@@ -2529,7 +2529,7 @@ const BillActions = ({ bill, shopName, onClose, showNewBill }) => {
       t += `\n⚠️ Balance Baki: Rs.${(bill.total - bill.received).toLocaleString()}`;
     }
 
-    t += `\n\nShukriya! Dobara padharo :)`;
+    t += `\n\nThank You, Visit Again :)`;
 
     const phone = bill.phone ? bill.phone.replace(/\D/g,"") : "";
     const num = phone.length === 10 ? `91${phone}` : phone;
@@ -4389,7 +4389,6 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
               {/* ── Bill Summary ── */}
               {(() => {
                 const s = calcBillSummary(showInvoice);
-                const mrpTotal = s.mrpSubtotal > 0 ? s.mrpSubtotal : showInvoice.total;
                 const totalDiscount = s.mrpDiscount + s.itemDiscTotal + s.billDiscAmt + s.legacyDisc + s.settledTotal;
                 return (
                   <div style={{ marginTop: 14, paddingTop: 12, borderTop: "2px solid #e5e7eb" }}>
