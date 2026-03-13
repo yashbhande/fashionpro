@@ -7790,6 +7790,7 @@ const DataDeleteSection = ({ sales, products, purchases, customers, setSales, se
               {step === "deleting" ? "⏳ Delete ho raha hai..." : "🗑️ Haan, Delete Karo"}
             </button>
           </div>
+        
         </>
       )}
     </div>
