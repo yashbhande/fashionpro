@@ -3273,6 +3273,7 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
   const [settleAmounts, setSettleAmounts] = useState({}); // { cartItemId: amountLess }
   const [showInvoice, setShowInvoice] = useState(null);
   const [saleInProgress, setSaleInProgress] = useState(false); // BUG29 FIX: double-click guard
+  const [dupConfirm, setDupConfirm] = useState(null); // { existingItem, newItem } — custom modal instead of window.confirm
   // Quick-add row
   const [quickName, setQuickName] = useState("");
   const [quickPrice, setQuickPrice] = useState("");
@@ -3352,17 +3353,9 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
       it.price === newItem.price
     );
     if (existing) {
-      // Confirm se qty badhaao — accidental duplicate prevent karo
-      if (window.confirm(`"${newItem.name}" (${newItem.size}/${newItem.color}) already cart mein hai.\n\nQty badhaao? (OK = qty add, Cancel = alag row banana)`)) {
-        setCart(prev => prev.map(it =>
-          it.cartItemId === existing.cartItemId ? { ...it, qty: it.qty + newItem.qty } : it
-        ));
-        setQuickName(""); setQuickPrice(""); setQuickQty(1); setQuickSize(""); setQuickColor(""); setSearch(""); setSelectedProduct(null); setSelectedVariant(null);
-        showToast(`Qty update ho gaya! ✓`);
-        searchRef.current?.focus();
-        return;
-      }
-      // Cancel = duplicate row allow (intentional)
+      // BUG_CONFIRM_FIX: window.confirm React ko hang kar deta tha — custom modal use karo
+      setDupConfirm({ existingItem: existing, newItem });
+      return;
     }
     setCart(prev => [...prev, newItem]);
     setQuickName(""); setQuickPrice(""); setQuickQty(1); setQuickSize(""); setQuickColor(""); setSearch(""); setSelectedProduct(null); setSelectedVariant(null);
@@ -3566,8 +3559,57 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
     setSaleInProgress(false); // BUG29 FIX: unlock after sale complete
   };
 
+  // BUG_CONFIRM_FIX: Custom modal handlers — window.confirm ki jagah
+  const handleDupQty = () => {
+    if (!dupConfirm) return;
+    const { existingItem, newItem } = dupConfirm;
+    setCart(prev => prev.map(it =>
+      it.cartItemId === existingItem.cartItemId ? { ...it, qty: it.qty + newItem.qty } : it
+    ));
+    setDupConfirm(null);
+    setQuickName(""); setQuickPrice(""); setQuickQty(1); setQuickSize(""); setQuickColor(""); setSearch(""); setSelectedProduct(null); setSelectedVariant(null);
+    showToast("Qty update ho gaya! ✓");
+    setTimeout(() => searchRef.current?.focus(), 50);
+  };
+  const handleDupRow = () => {
+    if (!dupConfirm) return;
+    const { newItem } = dupConfirm;
+    setCart(prev => [...prev, newItem]);
+    setDupConfirm(null);
+    setQuickName(""); setQuickPrice(""); setQuickQty(1); setQuickSize(""); setQuickColor(""); setSearch(""); setSelectedProduct(null); setSelectedVariant(null);
+    showToast("Alag row mein add ho gaya! ✓");
+    setTimeout(() => searchRef.current?.focus(), 50);
+  };
+
   return (
     <div className="page" style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 20, alignItems: "start" }}>
+      {/* Duplicate item confirm modal — replaces window.confirm to prevent app freeze */}
+      {dupConfirm && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "white", borderRadius: 16, padding: 28, width: 340, boxShadow: "0 20px 60px rgba(0,0,0,0.25)", fontFamily: "inherit" }}>
+            <div style={{ fontSize: 28, textAlign: "center", marginBottom: 12 }}>⚠️</div>
+            <h3 style={{ fontSize: 15, fontWeight: 700, textAlign: "center", marginBottom: 8 }}>Item already cart mein hai!</h3>
+            <p style={{ fontSize: 13, color: "#6b7280", textAlign: "center", marginBottom: 20 }}>
+              <b>"{dupConfirm.newItem.name}"</b> ({dupConfirm.newItem.size}/{dupConfirm.newItem.color})<br/>
+              already cart mein hai. Kya karna hai?
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={handleDupQty}
+                style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: "none", background: "#6366f1", color: "white", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+              >
+                ➕ Qty Badhao
+              </button>
+              <button
+                onClick={handleDupRow}
+                style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: "1.5px solid #e5e7eb", background: "white", color: "#374151", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+              >
+                📋 Alag Row
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Left: Quick Add + Cart */}
       <div>
         {/* Fast Entry Row */}

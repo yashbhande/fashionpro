@@ -69,6 +69,18 @@ const getISTDaysAgo = (days) => {
   return past.toISOString().split("T")[0]; // YYYY-MM-DD in IST
 };
 
+// ── Search relevance sort — startsWith > includes, then alpha ──
+// Usage: arr.filter(...).sort((a,b) => searchSort(a.name, b.name, query))
+const searchSort = (aStr, bStr, q) => {
+  const a = (aStr || "").toLowerCase();
+  const b = (bStr || "").toLowerCase();
+  const aq = q.toLowerCase();
+  const aStarts = a.startsWith(aq) ? 0 : a.includes(aq) ? 1 : 2;
+  const bStarts = b.startsWith(aq) ? 0 : b.includes(aq) ? 1 : 2;
+  if (aStarts !== bStarts) return aStarts - bStarts;
+  return a.localeCompare(b); // alphabetical within same tier
+};
+
 // BUG20 FIX: saveSingle — sirf ek document update karo, poori collection nahi
 // 500 products hain → ek change pe 500 writes nahi, sirf 1
 const saveSingle = async (colName, item) => {
@@ -213,6 +225,12 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
   const [replaceItemDisc, setReplaceItemDisc] = useState("");
   const [replQuery, setReplQuery] = useState("");
   const [replDropOpen, setReplDropOpen] = useState(false);
+
+  // Edit customer state
+  const [showEditCust, setShowEditCust] = useState(false);
+  const [editCustName, setEditCustName] = useState("");
+  const [editCustPhone, setEditCustPhone] = useState("");
+  const [editCustRegion, setEditCustRegion] = useState("");
 
   // Return state
   const [returnSelected, setReturnSelected] = useState({});
@@ -531,7 +549,7 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
           <div style={{ width:38, height:38, background:"linear-gradient(135deg,#7c3aed,#a855f7)", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontWeight:800, fontSize:17, flexShrink:0 }}>
             {(curSale.customer||"W").charAt(0).toUpperCase()}
           </div>
-          <div>
+          <div style={{ flex:1 }}>
             {curSale.phone ? (
               <p onClick={() => { onClose(); setHighlightPhone(curSale.phone); setActiveTab("customers"); }}
                 style={{ fontWeight:700, fontSize:14, color:"#7c3aed", cursor:"pointer", textDecoration:"underline" }}>
@@ -541,7 +559,16 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
               <p style={{ fontWeight:700, fontSize:14, color:"#1f2937" }}>{curSale.customer||"Walk-in"}</p>
             )}
             {curSale.phone && <p style={{ fontSize:12, color:"#9ca3af" }}>📞 {curSale.phone}</p>}
+            {curSale.region && <p style={{ fontSize:11, color:"#9ca3af" }}>{curSale.region}</p>}
           </div>
+          {isAdmin && setSales && (
+            <button
+              onClick={() => setShowEditCust(true)}
+              style={{ fontSize:11, padding:"5px 10px", background:"#ede9fe", border:"1.5px solid #c4b5fd", borderRadius:8, cursor:"pointer", fontWeight:700, color:"#7c3aed", whiteSpace:"nowrap" }}
+            >
+              ✏️ {(!curSale.customer || curSale.customer === "Walk-in") && !curSale.phone ? "Add Details" : "Edit"}
+            </button>
+          )}
         </div>
 
         {/* ── Action buttons (only when admin + setSales available) ── */}
@@ -681,7 +708,7 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
               const newEff = Math.max(0, newP * newQ - newIDisc);
               const diff = newP > 0 ? oldActualPaid - newEff : null;
               const replResults = replQuery.length >= 1
-                ? products.filter(p => p.name.toLowerCase().includes(replQuery.toLowerCase()) || (p.sku||"").toLowerCase().includes(replQuery.toLowerCase())).slice(0, 6)
+                ? products.filter(p => p.name.toLowerCase().includes(replQuery.toLowerCase()) || (p.sku||"").toLowerCase().includes(replQuery.toLowerCase())).sort((a,b) => searchSort(a.name, b.name, replQuery)).slice(0, 6)
                 : [];
               const pickRepl = (p) => { setReplaceNewName(p.name); setReplaceNewPrice(p.sellingPrice || ""); setReplQuery(p.name); setReplDropOpen(false); };
               return (
@@ -883,6 +910,45 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
 
         <BillActions bill={{...curSale, ...cv, items: cvItems}} shopName={shopName} onClose={onClose} showNewBill={false} />
       </div>
+
+      {/* ── Edit Customer Modal ── */}
+      {showEditCust && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:2000, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+          <div style={{ background:"#fff", borderRadius:"20px 20px 0 0", padding:24, width:"100%", maxWidth:480, paddingBottom:36 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <p style={{ fontSize:16, fontWeight:800, color:"#111827" }}>✏️ Customer Details Edit Karo</p>
+              <button onClick={() => setShowEditCust(false)} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#6b7280" }}>×</button>
+            </div>
+            <label style={{ fontSize:11, fontWeight:700, color:"#6b7280", display:"block", marginBottom:4 }}>CUSTOMER NAAM</label>
+            <input className="input" placeholder="Naam daalo..." value={editCustName}
+              onChange={e => setEditCustName(e.target.value)}
+              style={{ marginBottom:12 }}
+            />
+            <label style={{ fontSize:11, fontWeight:700, color:"#6b7280", display:"block", marginBottom:4 }}>PHONE NUMBER</label>
+            <input className="input" placeholder="10 digit number..." type="tel" maxLength={10} value={editCustPhone}
+              onChange={e => setEditCustPhone(e.target.value)}
+              style={{ marginBottom:12 }}
+            />
+            <label style={{ fontSize:11, fontWeight:700, color:"#6b7280", display:"block", marginBottom:6 }}>REGION</label>
+            <div style={{ display:"flex", gap:6, marginBottom:20 }}>
+              {[["","Any"],["local","Local"],["out-city","Out City"],["out-state","Out State"]].map(([v,l]) => (
+                <button key={v} onClick={() => setEditCustRegion(v)}
+                  style={{ flex:1, padding:"6px 4px", borderRadius:8, border:`1.5px solid ${editCustRegion===v?"#7c3aed":"#e5e7eb"}`, background: editCustRegion===v?"#7c3aed":"#fff", color: editCustRegion===v?"#fff":"#6b7280", fontWeight:600, fontSize:11, cursor:"pointer" }}
+                >{l}</button>
+              ))}
+            </div>
+            <button
+              style={{ width:"100%", padding:"13px", background:"#059669", color:"#fff", border:"none", borderRadius:12, fontWeight:800, fontSize:15, cursor:"pointer" }}
+              onClick={() => {
+                const updated = { ...curSale, customer: editCustName || "Walk-in", phone: editCustPhone, region: editCustRegion };
+                setCurSale(updated);
+                if (setSales) setSales(prev => prev.map(s => s.id === updated.id ? updated : s));
+                setShowEditCust(false);
+              }}
+            >Save Changes</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1511,7 +1577,7 @@ export default function App() {
         )}
         <div className="page-content">
           {activeTab === "dashboard" && (isAdmin ? <Dashboard products={products} sales={sales} purchases={purchases} totalRevenue={totalRevenue} totalProfit={totalProfit} todayRevenue={todayRevenue} todaySales={todaySales} lowStockProducts={lowStockProducts} setActiveTab={setActiveTab} shopName={shopName} setGlobalInvoiceSale={setGlobalInvoiceSale} /> : <StaffBlocked />)}
-          {activeTab === "inventory" && <Inventory products={products} setProducts={setProducts} showToast={showToast} lowStockProducts={lowStockProducts} isAdmin={isAdmin} generateSKU={generateSKU} customSizes={customSizes} inventoryNav={inventoryNav} setInventoryNav={setInventoryNav} />}
+          {activeTab === "inventory" && <Inventory products={products} setProducts={setProducts} showToast={showToast} lowStockProducts={lowStockProducts} isAdmin={isAdmin} generateSKU={generateSKU} customSizes={customSizes} inventoryNav={inventoryNav} setInventoryNav={setInventoryNav} sales={sales} />}
           {activeTab === "billing" && <Billing products={products} setProducts={setProducts} sales={sales} setSales={setSales} customers={customers} setCustomers={setCustomers} showToast={showToast} billCounter={billCounter} setBillCounter={setBillCounter} shopName={shopName} isAdmin={isAdmin} setActiveTab={setActiveTab} setHighlightPhone={setHighlightPhone} setGlobalInvoiceSale={setGlobalInvoiceSale} />}
           {activeTab === "billhistory" && <BillHistory sales={sales} setSales={setSales} products={products} setProducts={setProducts} customers={customers} setCustomers={setCustomers} billCounter={billCounter} setBillCounter={setBillCounter} shopName={shopName} isAdmin={isAdmin} setActiveTab={setActiveTab} setHighlightPhone={setHighlightPhone} setGlobalInvoiceSale={setGlobalInvoiceSale} />}
           {activeTab === "purchases" && (isAdmin ? <Purchases purchases={purchases} setPurchases={setPurchases} products={products} setProducts={setProducts} showToast={showToast} /> : <StaffBlocked />)}
@@ -1689,24 +1755,55 @@ const BillHistory = ({ sales, setSales, products, setProducts, customers, setCus
     if (filter === "custom")    base = base.filter(s => getDate(s) >= customDate && getDate(s) <= (customDateTo||customDate));
 
     if (searchText.trim()) {
-      const q = searchText.toLowerCase();
-      base = base.filter(s => s.billNo?.toLowerCase().includes(q) || s.customer?.toLowerCase().includes(q) || s.phone?.includes(q) || getCurrentVersion(s).items?.some(i => i.name?.toLowerCase().includes(q) || i.size?.toLowerCase().includes(q) || i.color?.toLowerCase().includes(q) || (i.sku||'').toLowerCase().includes(q)));
+      const q = searchText.toLowerCase().trim();
+      // Extract numeric part of billNo for number-only searches (e.g. "2" matches "INV-002")
+      const qNum = q.replace(/\D/g, "");
+      base = base.filter(s => {
+        const bill = (s.billNo||"").toLowerCase();
+        const billNum = bill.replace(/\D/g, "");
+        const cust = (s.customer||"").toLowerCase();
+        return bill.includes(q) || (qNum && billNum === qNum) ||
+          cust.includes(q) || (s.phone||"").includes(q) ||
+          getCurrentVersion(s).items?.some(i => i.name?.toLowerCase().includes(q) || i.size?.toLowerCase().includes(q) || i.color?.toLowerCase().includes(q) || (i.sku||"").toLowerCase().includes(q));
+      });
+      base.sort((a, b) => {
+        const rank = (s) => {
+          const bill = (s.billNo||"").toLowerCase();
+          const billNum = bill.replace(/\D/g, "");
+          const cust = (s.customer||"").toLowerCase();
+          // Exact bill number match (e.g. searching "2" → INV-002 billNum="002" ends with "2")
+          if (qNum && billNum === qNum.padStart(billNum.length, "0")) return 0;
+          if (qNum && billNum.endsWith(qNum)) return 0;
+          if (bill === q) return 0;
+          if (bill.includes(q) && bill.startsWith(q.replace(/\D/g,""))) return 1;
+          if (cust.startsWith(q)) return 2;
+          if (cust.includes(q) || (s.phone||"").includes(q)) return 3;
+          return 4;
+        };
+        const diff = rank(a) - rank(b);
+        if (diff !== 0) return diff;
+        // Within same rank, sort by bill number descending
+        return parseInt((b.billNo||"0").replace(/\D/g,""),10) - parseInt((a.billNo||"0").replace(/\D/g,""),10);
+      });
     }
     if (regionFilter !== "all") base = base.filter(s => (s.region||"") === regionFilter);
     if (billTypeFilter !== "all") base = base.filter(s => getType(s) === billTypeFilter);
     if (minAmt) base = base.filter(s => getTotal(s) >= +minAmt);
     if (maxAmt) base = base.filter(s => getTotal(s) <= +maxAmt);
 
-    base.sort((a, b) => {
-      if (sortBy === "date_desc")   return getFullDate(b).localeCompare(getFullDate(a));
-      if (sortBy === "date_asc")    return getFullDate(a).localeCompare(getFullDate(b));
-      if (sortBy === "bill_desc")   return parseInt((b.billNo||"0").replace(/\D/g,""),10) - parseInt((a.billNo||"0").replace(/\D/g,""),10);
-      if (sortBy === "bill_asc")    return parseInt((a.billNo||"0").replace(/\D/g,""),10) - parseInt((b.billNo||"0").replace(/\D/g,""),10);
-      if (sortBy === "amount_desc") return getTotal(b) - getTotal(a);
-      if (sortBy === "amount_asc")  return getTotal(a) - getTotal(b);
-      if (sortBy === "customer")    return (a.customer||"").localeCompare(b.customer||"");
-      return getFullDate(b).localeCompare(getFullDate(a));
-    });
+    // When search active, keep search relevance order; otherwise apply sortBy
+    if (!searchText.trim()) {
+      base.sort((a, b) => {
+        if (sortBy === "date_desc")   return getFullDate(b).localeCompare(getFullDate(a));
+        if (sortBy === "date_asc")    return getFullDate(a).localeCompare(getFullDate(b));
+        if (sortBy === "bill_desc")   return parseInt((b.billNo||"0").replace(/\D/g,""),10) - parseInt((a.billNo||"0").replace(/\D/g,""),10);
+        if (sortBy === "bill_asc")    return parseInt((a.billNo||"0").replace(/\D/g,""),10) - parseInt((b.billNo||"0").replace(/\D/g,""),10);
+        if (sortBy === "amount_desc") return getTotal(b) - getTotal(a);
+        if (sortBy === "amount_asc")  return getTotal(a) - getTotal(b);
+        if (sortBy === "customer")    return (a.customer||"").localeCompare(b.customer||"");
+        return getFullDate(b).localeCompare(getFullDate(a));
+      });
+    }
     return base;
   };
 
@@ -2605,7 +2702,7 @@ const StaffBlocked = () => (
 // Default blank size variant row
 const blankVariant = () => ({ size: "", purchasePrice: "", mrp: "", sellingPrice: "", stock: "" });
 
-const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin, generateSKU, customSizes = [], inventoryNav, setInventoryNav }) => {
+const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin, generateSKU, customSizes = [], inventoryNav, setInventoryNav, sales = [] }) => {
   const allSizes = [...SIZES, ...customSizes.filter(s => !SIZES.includes(s))];
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("All");
@@ -2616,6 +2713,7 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
   const [editSkuId, setEditSkuId] = useState(null); // inline SKU edit
   const [skuConflict, setSkuConflict] = useState(null); // conflict detection
   const [priceHistoryProduct, setPriceHistoryProduct] = useState(null); // price history modal
+  const [stockHistoryProduct, setStockHistoryProduct] = useState(null); // stock history modal
   const [editSkuVal, setEditSkuVal] = useState("");
   const [form, setForm] = useState({
     name: "", category: "Shirt", brand: "", colors: "",
@@ -2634,6 +2732,10 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
       (stockFilter === "all" || (stockFilter === "out" && p.quantity === 0) || (stockFilter === "low" && p.quantity > 0 && p.quantity <= 5) || (stockFilter === "ok" && p.quantity > 5))
     )
     .sort((a, b) => {
+      if (search.trim()) {
+        const r = searchSort(a.name, b.name, search);
+        if (r !== 0) return r;
+      }
       if (sortBy === "name")        return a.name.localeCompare(b.name);
       if (sortBy === "stock_asc")   return a.quantity - b.quantity;
       if (sortBy === "stock_desc")  return b.quantity - a.quantity;
@@ -2841,7 +2943,14 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
                 const isSV = p.pricingType === "size-variant" && p.sizeVariants?.length > 0;
                 const ppp = p.piecesPerPack || 1;
                 const mrpPerPiece = p.mrp > 0 ? Math.round(p.mrp / ppp) : 0;
-                const margin = p.purchasePrice > 0 ? Math.round(((p.sellingPrice - p.purchasePrice) / p.sellingPrice) * 100) : 0;
+                // For size-variant: use first variant's prices if top-level is missing
+                const effPurchase = isSV && !p.purchasePrice
+                  ? +(p.sizeVariants.find(sv => sv.purchasePrice)?.purchasePrice || 0)
+                  : (p.purchasePrice || 0);
+                const effSelling = isSV && !p.sellingPrice
+                  ? +(p.sizeVariants.find(sv => sv.sellingPrice)?.sellingPrice || 0)
+                  : (p.sellingPrice || 0);
+                const margin = effPurchase > 0 && effSelling > 0 ? Math.round(((effSelling - effPurchase) / effSelling) * 100) : 0;
                 return (
                   <tr key={p.id} id={`inv-product-${p.id}`}>
                     <td>
@@ -2951,6 +3060,9 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
                             onClick={() => setPriceHistoryProduct(p)}
                             style={{ color: "#f59e0b", borderColor: "#fcd34d", fontSize: 12 }}>📈</button>
                         )}
+                        <button className="btn btn-outline btn-sm" title="Stock History"
+                          onClick={() => setStockHistoryProduct(p)}
+                          style={{ color: "#7c3aed", borderColor: "#c4b5fd", fontSize: 12 }}>📦</button>
                         {isAdmin && <button className="btn btn-danger btn-sm" onClick={() => deleteProduct(p.id)}><Icon name="trash" size={14} /></button>}
                       </div>
                     </td>
@@ -3250,6 +3362,73 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
           </div>
         </div>
       )}
+
+      {/* ── Stock History Modal ── */}
+      {stockHistoryProduct && (() => {
+        const p = stockHistoryProduct;
+        const events = [];
+        (p.priceHistory || []).forEach(h => {
+          events.push({ date: h.date, type: "purchase", qty: +h.qty || 0, note: `Purchase — ${h.supplier || "Supplier"}`, price: h.purchasePrice });
+        });
+        sales.forEach(s => {
+          const cv = getCurrentVersion(s);
+          const items = cv.items || s.items || [];
+          items.forEach(it => {
+            if ((it.productId && it.productId === p.id) || it.name?.toLowerCase() === p.name?.toLowerCase()) {
+              const isReturn = cv.type === "return";
+              events.push({ date: cv.date || s.date, type: isReturn ? "return" : "sale", qty: isReturn ? +(it.returnedQty || it.qty || 1) : +(it.qty || 1), note: `${isReturn ? "Return" : "Sale"} — ${s.billNo}${s.customer && s.customer !== "Walk-in" ? ` (${s.customer})` : ""}`, price: it.sellingPrice || it.price });
+            }
+          });
+        });
+        events.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+        let running = p.quantity;
+        const withStock = events.map(e => {
+          const snap = running;
+          if (e.type === "sale") running += e.qty;
+          else if (e.type === "purchase" || e.type === "return") running -= e.qty;
+          return { ...e, stockAfter: snap };
+        });
+        return (
+          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+            <div className="card" style={{ width:"100%", maxWidth:560, maxHeight:"82vh", overflowY:"auto", position:"relative" }}>
+              <button onClick={() => setStockHistoryProduct(null)} style={{ position:"absolute", top:12, right:12, background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#6b7280" }}>×</button>
+              <h3 style={{ fontSize:16, fontWeight:800, marginBottom:4 }}>📦 Stock History</h3>
+              <p style={{ fontSize:13, color:"#6b7280", marginBottom:10, fontWeight:600 }}>{p.name} {p.sku ? `[${p.sku}]` : ""}</p>
+              <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
+                <span style={{ background:"#f0fdf4", border:"1px solid #86efac", borderRadius:8, padding:"4px 12px", fontSize:12, fontWeight:700, color:"#059669" }}>Current Stock: {p.quantity} pcs</span>
+                {p.sellingPrice && <span style={{ background:"#f5f3ff", border:"1px solid #c4b5fd", borderRadius:8, padding:"4px 12px", fontSize:12, fontWeight:700, color:"#7c3aed" }}>Selling: ₹{p.sellingPrice}</span>}
+                {p.purchasePrice && <span style={{ background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:8, padding:"4px 12px", fontSize:12, fontWeight:700, color:"#92400e" }}>Purchase: ₹{p.purchasePrice}</span>}
+              </div>
+              {withStock.length === 0 ? (
+                <p style={{ color:"#9ca3af", fontSize:13 }}>Koi stock history nahi mili. Purchase ya sale karo toh yahan dikhega.</p>
+              ) : (
+                <table className="table" style={{ fontSize:12 }}>
+                  <thead><tr><th>Date</th><th>Type</th><th>Qty</th><th>Rate</th><th>Stock After</th><th>Note</th></tr></thead>
+                  <tbody>
+                    {withStock.map((e, i) => {
+                      const color = e.type === "purchase" ? "#059669" : e.type === "return" ? "#d97706" : "#dc2626";
+                      const sign  = e.type === "sale" ? "−" : "+";
+                      let ds = e.date || "";
+                      try { if (ds.length >= 10) { const [y,m,d] = ds.slice(0,10).split("-"); const mo=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; ds=`${d} ${mo[+m-1]} ${y}`; } } catch {}
+                      return (
+                        <tr key={i}>
+                          <td style={{ whiteSpace:"nowrap" }}>{ds}</td>
+                          <td><span style={{ background:e.type==="purchase"?"#f0fdf4":e.type==="return"?"#fff7ed":"#fef2f2", color, padding:"2px 7px", borderRadius:6, fontWeight:700, fontSize:11 }}>{e.type==="purchase"?"📥 Purchase":e.type==="return"?"↩️ Return":"📤 Sale"}</span></td>
+                          <td style={{ fontWeight:700, color }}>{sign}{e.qty}</td>
+                          <td style={{ color:"#6b7280" }}>{e.price ? `₹${e.price}` : "—"}</td>
+                          <td style={{ fontWeight:700 }}>{e.stockAfter}</td>
+                          <td style={{ color:"#6b7280", fontSize:11, maxWidth:160 }}>{e.note}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+              <p style={{ marginTop:12, fontSize:11, color:"#9ca3af" }}>💡 Sales, returns aur purchases se calculate hoti hai stock history</p>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
@@ -3291,11 +3470,34 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
   const [codeDropdownIdx, setCodeDropdownIdx] = useState(-1);
 
   // BUG19 FIX: useMemo — filteredProducts har render pe recalculate nahi hoga
-  const filteredProducts = React.useMemo(() => products.filter(p =>
-    p.name.toLowerCase().includes(search.toLowerCase()) ||
-    p.category.toLowerCase().includes(search.toLowerCase()) ||
-    (p.sku || "").toLowerCase().includes(search.toLowerCase())
-  ), [products, search]);
+  // Name search: only name + category (NOT sku — sku has its own box)
+  const filteredProducts = React.useMemo(() => {
+    const q = search.toLowerCase().trim();
+    if (!q) return products;
+    return products
+      .filter(p =>
+        p.name.toLowerCase().includes(q) ||
+        p.category.toLowerCase().includes(q)
+      )
+      .sort((a, b) => searchSort(a.name, b.name, q));
+  }, [products, search]);
+
+  // SKU/code search: only sku field, sort by sku startsWith first
+  const skuFilteredProducts = React.useMemo(() => {
+    const q = codeSearch.toLowerCase().trim();
+    if (!q) return [];
+    return products
+      .filter(p =>
+        (p.sku || "").toLowerCase().includes(q) ||
+        p.name.toLowerCase().includes(q)
+      )
+      .sort((a, b) => {
+        const aS = (a.sku||"").toLowerCase().startsWith(q) ? 0 : (a.sku||"").toLowerCase().includes(q) ? 1 : 2;
+        const bS = (b.sku||"").toLowerCase().startsWith(q) ? 0 : (b.sku||"").toLowerCase().includes(q) ? 1 : 2;
+        if (aS !== bS) return aS - bS;
+        return a.name.localeCompare(b.name);
+      });
+  }, [products, codeSearch]);
 
   // When user picks product from dropdown — pre-fill quick-add row
   const selectProduct = (p) => {
@@ -3636,7 +3838,7 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
                   onFocus={() => setShowDropdown(true)}
                   onBlur={() => setTimeout(() => { setShowDropdown(false); setDropdownIdx(-1); }, 180)}
                   onKeyDown={e => {
-                    const nr = filteredProducts.filter(p => p.name.toLowerCase().includes(search.toLowerCase()));
+                    const nr = filteredProducts;
                     if (!showDropdown || nr.length === 0) { if (e.key === "Enter") addToCart(); return; }
                     if (e.key === "ArrowDown") { e.preventDefault(); setDropdownIdx(i => Math.min(i + 1, nr.length - 1)); }
                     else if (e.key === "ArrowUp") { e.preventDefault(); setDropdownIdx(i => Math.max(i - 1, 0)); }
@@ -3648,9 +3850,9 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
                   }}
                 />
               </div>
-              {showDropdown && search && filteredProducts.filter(p => p.name.toLowerCase().includes(search.toLowerCase())).length > 0 && (
+              {showDropdown && search && filteredProducts.length > 0 && (
                 <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "white", border: "1.5px solid #e5e7eb", borderRadius: 12, zIndex: 200, boxShadow: "0 8px 24px rgba(0,0,0,0.1)", maxHeight: 220, overflowY: "auto", marginTop: 4 }}>
-                  {filteredProducts.filter(p => p.name.toLowerCase().includes(search.toLowerCase())).map((p, idx) => (
+                  {filteredProducts.map((p, idx) => (
                     <div key={p.id} onMouseDown={() => selectProduct(p)}
                       style={{ padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid #f9fafb", display: "flex", justifyContent: "space-between", alignItems: "center", background: idx === dropdownIdx ? "#f5f3ff" : "white", borderLeft: idx === dropdownIdx ? "3px solid #7c3aed" : "3px solid transparent" }}>
                       <div>
@@ -3683,7 +3885,7 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
                   onFocus={() => setShowCodeDrop(true)}
                   onBlur={() => setTimeout(() => { setShowCodeDrop(false); setCodeDropdownIdx(-1); }, 180)}
                   onKeyDown={e => {
-                    const cr = filteredProducts.filter(p => (p.sku||"").toLowerCase().includes(codeSearch.toLowerCase()));
+                    const cr = skuFilteredProducts;
                     if (!showCodeDrop || cr.length === 0) { if (e.key === "Enter") addToCart(); return; }
                     if (e.key === "ArrowDown") { e.preventDefault(); setCodeDropdownIdx(i => Math.min(i + 1, cr.length - 1)); }
                     else if (e.key === "ArrowUp") { e.preventDefault(); setCodeDropdownIdx(i => Math.max(i - 1, 0)); }
@@ -3695,9 +3897,9 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
                   }}
                 />
               </div>
-              {showCodeDrop && codeSearch && filteredProducts.filter(p => (p.sku||"").toLowerCase().includes(codeSearch.toLowerCase())).length > 0 && (
+              {showCodeDrop && codeSearch && skuFilteredProducts.length > 0 && (
                 <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "white", border: "1.5px solid #e5e7eb", borderRadius: 12, zIndex: 200, boxShadow: "0 8px 24px rgba(0,0,0,0.1)", maxHeight: 220, overflowY: "auto", marginTop: 4 }}>
-                  {filteredProducts.filter(p => (p.sku||"").toLowerCase().includes(codeSearch.toLowerCase())).map((p, idx) => (
+                  {skuFilteredProducts.map((p, idx) => (
                     <div key={p.id} onMouseDown={() => { selectProduct(p); setCodeSearch(""); }}
                       style={{ padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid #f9fafb", display: "flex", justifyContent: "space-between", alignItems: "center", background: idx === codeDropdownIdx ? "#f5f3ff" : "white", borderLeft: idx === codeDropdownIdx ? "3px solid #7c3aed" : "3px solid transparent" }}>
                       <div>
@@ -3985,7 +4187,7 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
                 const matches = customers.filter(c =>
                   c.name?.toLowerCase().includes(customerName.toLowerCase()) ||
                   c.phone?.includes(customerName)
-                ).slice(0, 5);
+                ).sort((a, b) => searchSort(a.name, b.name, customerName)).slice(0, 5);
                 if (!matches.length) return null;
                 return (
                   <div style={{ position:"absolute", top:"100%", left:0, right:0, background:"white", border:"1.5px solid #e5e7eb", borderRadius:10, zIndex:200, boxShadow:"0 8px 20px rgba(0,0,0,0.1)", marginTop:3 }}>
@@ -4516,11 +4718,19 @@ const Purchases = ({ purchases, setPurchases, products, setProducts, showToast }
     setCodeSearch("");
   };
 
-  // Search products by code or name
-  const codeFiltered = products.filter(p =>
-    (p.sku || "").toLowerCase().includes(codeSearch.toLowerCase()) ||
-    p.name.toLowerCase().includes(codeSearch.toLowerCase())
-  );
+  // Search products by SKU or name — SKU startsWith gets top priority
+  const codeFiltered = products
+    .filter(p =>
+      (p.sku || "").toLowerCase().includes(codeSearch.toLowerCase()) ||
+      p.name.toLowerCase().includes(codeSearch.toLowerCase())
+    )
+    .sort((a, b) => {
+      const q = codeSearch.toLowerCase();
+      const aS = (a.sku||"").toLowerCase().startsWith(q) ? 0 : (a.sku||"").toLowerCase().includes(q) ? 1 : a.name.toLowerCase().startsWith(q) ? 2 : 3;
+      const bS = (b.sku||"").toLowerCase().startsWith(q) ? 0 : (b.sku||"").toLowerCase().includes(q) ? 1 : b.name.toLowerCase().startsWith(q) ? 2 : 3;
+      if (aS !== bS) return aS - bS;
+      return a.name.localeCompare(b.name);
+    });
 
   // When user selects a product from search
   const selectExistingProduct = (p) => {
@@ -5344,12 +5554,12 @@ const Reports = ({ sales, products, purchases, customers, setGlobalInvoiceSale }
   const rcv = (s) => { if (!s) return {}; return (s.versions && s.versions.length > 0) ? (s.versions[s.currentVersion ?? s.versions.length - 1] || s.versions[0] || s) : s; };
 
   const filterSales = () => {
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = getISTDateStr();
     let result = [...sales];
-    // Date filter
-    if (period === "today") result = result.filter(s => (rcv(s).date||s.date) === todayStr);
-    else if (period === "week") { const d = new Date(); d.setDate(d.getDate()-7); result = result.filter(s => new Date(rcv(s).date||s.date) >= d); }
-    else if (period === "month") { const d = new Date(); d.setDate(d.getDate()-30); result = result.filter(s => new Date(rcv(s).date||s.date) >= d); }
+    // Date filter — always compare YYYY-MM-DD slice for reliability
+    if (period === "today") result = result.filter(s => ((rcv(s).date||s.date)||"").slice(0,10) === todayStr);
+    else if (period === "week") { const d = getISTDaysAgo(7); result = result.filter(s => ((rcv(s).date||s.date)||"").slice(0,10) >= d); }
+    else if (period === "month") { const d = getISTDaysAgo(30); result = result.filter(s => ((rcv(s).date||s.date)||"").slice(0,10) >= d); }
     else if (period === "custom" && customFrom) {
       result = result.filter(s => {
         const d = rcv(s).date||s.date;
@@ -5360,28 +5570,49 @@ const Reports = ({ sales, products, purchases, customers, setGlobalInvoiceSale }
     if (regionFilter !== "all") result = result.filter(s => (s.region||"") === regionFilter);
     // Search (customer name / bill no / item name)
     if (searchQ.trim()) {
-      const q = searchQ.toLowerCase();
-      result = result.filter(s =>
-        (s.customer||"").toLowerCase().includes(q) ||
-        (s.billNo||"").toLowerCase().includes(q) ||
-        (s.phone||"").includes(q) ||
-        (rcv(s).items||[]).some(it => it.name.toLowerCase().includes(q))
-      );
+      const q = searchQ.toLowerCase().trim();
+      const qNum = q.replace(/\D/g, "");
+      result = result.filter(s => {
+        const bill = (s.billNo||"").toLowerCase();
+        const billNum = bill.replace(/\D/g, "");
+        return bill.includes(q) || (qNum && billNum.endsWith(qNum)) ||
+          (s.customer||"").toLowerCase().includes(q) ||
+          (s.phone||"").includes(q) ||
+          (rcv(s).items||[]).some(it => it.name.toLowerCase().includes(q));
+      });
+      result.sort((a, b) => {
+        const rank = (s) => {
+          const bill = (s.billNo||"").toLowerCase();
+          const billNum = bill.replace(/\D/g, "");
+          const cust = (s.customer||"").toLowerCase();
+          if (qNum && billNum === qNum.padStart(billNum.length, "0")) return 0;
+          if (qNum && billNum.endsWith(qNum)) return 0;
+          if (bill === q) return 0;
+          if (cust.startsWith(q)) return 1;
+          if (cust.includes(q) || (s.phone||"").includes(q)) return 2;
+          return 3;
+        };
+        const diff = rank(a) - rank(b);
+        if (diff !== 0) return diff;
+        return parseInt((b.billNo||"0").replace(/\D/g,""),10) - parseInt((a.billNo||"0").replace(/\D/g,""),10);
+      });
     }
     // Amount filter
     if (minAmount) result = result.filter(s => rcv(s).total >= +minAmount);
     if (maxAmount) result = result.filter(s => rcv(s).total <= +maxAmount);
-    // Sort
-    result.sort((a, b) => {
-      const av = rcv(a), bv = rcv(b);
-      if (sortBy === "date_desc") return new Date(bv.date||b.date) - new Date(av.date||a.date);
-      if (sortBy === "date_asc") return new Date(av.date||a.date) - new Date(bv.date||b.date);
-      if (sortBy === "amount_desc") return bv.total - av.total;
-      if (sortBy === "amount_asc") return av.total - bv.total;
-      if (sortBy === "customer") return (a.customer||"").localeCompare(b.customer||"");
-      if (sortBy === "items_desc") return (rcv(b).items||[]).reduce((s,i)=>s+i.qty,0) - (rcv(a).items||[]).reduce((s,i)=>s+i.qty,0);
-      return 0;
-    });
+    // Sort — only when NOT searching (search has its own relevance sort)
+    if (!searchQ.trim()) {
+      result.sort((a, b) => {
+        const av = rcv(a), bv = rcv(b);
+        if (sortBy === "date_desc") return new Date(bv.date||b.date) - new Date(av.date||a.date);
+        if (sortBy === "date_asc") return new Date(av.date||a.date) - new Date(bv.date||b.date);
+        if (sortBy === "amount_desc") return bv.total - av.total;
+        if (sortBy === "amount_asc") return av.total - bv.total;
+        if (sortBy === "customer") return (a.customer||"").localeCompare(b.customer||"");
+        if (sortBy === "items_desc") return (rcv(b).items||[]).reduce((s,i)=>s+i.qty,0) - (rcv(a).items||[]).reduce((s,i)=>s+i.qty,0);
+        return 0;
+      });
+    }
     return result;
   };
 
@@ -5688,7 +5919,11 @@ const MarginAnalysis = ({ sales, products, setGlobalInvoiceSale }) => {
   // BUG21 FIX: productMap — ek baar O(n) banao, har jagah O(1) lookup
   const productMap = React.useMemo(() => {
     const m = {};
-    products.forEach(p => { m[p.id] = p; if (p.name) m[p.name.toLowerCase()] = p; });
+    products.forEach(p => {
+      m[p.id] = p;           // number key
+      m[String(p.id)] = p;   // string key — fix for productId type mismatch
+      if (p.name) m[p.name.toLowerCase()] = p;
+    });
     return m;
   }, [products]);
 
@@ -5705,11 +5940,17 @@ const MarginAnalysis = ({ sales, products, setGlobalInvoiceSale }) => {
 
   // BUG21 FIX: productMap se O(1) lookup — products.find() O(n) tha
   const getPurchasePrice = (item) => {
-    const prod = productMap[item.productId] || productMap[item.name?.toLowerCase()];
+    const prod = productMap[item.productId] || productMap[String(item.productId)] || productMap[item.name?.toLowerCase()];
     if (!prod) return 0;
-    if (prod.pricingType === "size-variant" && item.size && item.size !== "-") {
-      const sv = prod.sizeVariants?.find(s => s.size === item.size);
-      if (sv) return sv.purchasePrice || 0;
+    if (prod.pricingType === "size-variant" && prod.sizeVariants?.length > 0) {
+      // Try to match by item size first
+      if (item.size && item.size !== "-") {
+        const sv = prod.sizeVariants.find(s => s.size === item.size);
+        if (sv?.purchasePrice) return +sv.purchasePrice;
+      }
+      // Fallback: first variant with a purchasePrice
+      const anyPP = prod.sizeVariants.find(sv => sv.purchasePrice);
+      if (anyPP) return +anyPP.purchasePrice;
     }
     return prod.purchasePrice || 0;
   };
@@ -5717,17 +5958,23 @@ const MarginAnalysis = ({ sales, products, setGlobalInvoiceSale }) => {
   // Filter bills
   const todayStr = getISTDateStr(); // BUG25 FIX: IST
   const filteredSales = sales.filter(s => {
-    const d = s.date || "";
-    if (period === "today" && d !== todayStr) return false;
-    if (period === "week") { const dt = new Date(); dt.setDate(dt.getDate()-7); if (new Date(d) < dt) return false; }
-    if (period === "month") { const dt = new Date(); dt.setDate(dt.getDate()-30); if (new Date(d) < dt) return false; }
+    const d = (s.versions && s.versions.length > 0 ? (s.versions[0].date || s.date) : s.date) || "";
+    const dSlice = d.slice(0, 10);
+    if (period === "today" && dSlice !== todayStr) return false;
+    if (period === "week") { const weekAgo = getISTDaysAgo(7); if (dSlice < weekAgo) return false; }
+    if (period === "month") { const monthAgo = getISTDaysAgo(30); if (dSlice < monthAgo) return false; }
     if (period === "custom") {
       if (fromDate && d < fromDate) return false;
       if (toDate && d > toDate) return false;
     }
     if (searchQ.trim()) {
-      const q = searchQ.toLowerCase();
-      if (!(s.customer||"").toLowerCase().includes(q) && !(s.billNo||"").toLowerCase().includes(q)) return false;
+      const q = searchQ.toLowerCase().trim();
+      const qNum = q.replace(/\D/g, "");
+      const bill = (s.billNo||"").toLowerCase();
+      const billNum = bill.replace(/\D/g, "");
+      const custMatch = (s.customer||"").toLowerCase().includes(q);
+      const billMatch = bill.includes(q) || (qNum && billNum.endsWith(qNum));
+      if (!custMatch && !billMatch) return false;
     }
     return true;
   });
@@ -5784,6 +6031,25 @@ const MarginAnalysis = ({ sales, products, setGlobalInvoiceSale }) => {
     if (categoryFilter !== "all" && !b.itemRows.some(ir => ir.category === categoryFilter)) return false;
     return true;
   }).sort((a, b) => {
+    if (searchQ.trim()) {
+      // Search active — relevance sort only
+      const q = searchQ.toLowerCase().trim();
+      const qNum = q.replace(/\D/g, "");
+      const rank = (r) => {
+        const bill = (r.sale.billNo||"").toLowerCase();
+        const billNum = bill.replace(/\D/g, "");
+        const cust = (r.sale.customer||"").toLowerCase();
+        if (qNum && billNum.endsWith(qNum)) return 0;
+        if (bill === q) return 0;
+        if (cust.startsWith(q)) return 1;
+        if (cust.includes(q)) return 2;
+        return 3;
+      };
+      const diff = rank(a) - rank(b);
+      if (diff !== 0) return diff;
+      return parseInt((b.sale.billNo||"0").replace(/\D/g,""),10) - parseInt((a.sale.billNo||"0").replace(/\D/g,""),10);
+    }
+    // No search — apply sortBy
     if (sortBy === "date_desc") return new Date(b.sale.date||0) - new Date(a.sale.date||0);
     if (sortBy === "date_asc") return new Date(a.sale.date||0) - new Date(b.sale.date||0);
     if (sortBy === "margin_desc") return (b.totalMarginPct||0) - (a.totalMarginPct||0);
@@ -5990,23 +6256,51 @@ const MarginAnalysis = ({ sales, products, setGlobalInvoiceSale }) => {
 // ============================================================
 const ProductSearch = ({ products, sales, purchases, isAdmin, setActiveTab, setInventoryNav }) => {
   const [query, setQuery] = useState("");
+  const [skuQuery, setSkuQuery] = useState("");
   const [selected, setSelected] = useState(null);
   const inputRef = React.useRef(null);
+  const skuRef = React.useRef(null);
 
   // Focus on mount
   useEffect(() => { inputRef.current?.focus(); }, []);
 
-  // Match by name (fuzzy) or SKU (exact prefix)
-  const results = query.trim().length === 0 ? [] : products.filter(p => {
-    const q = query.trim().toLowerCase();
-    return (
-      p.name.toLowerCase().includes(q) ||
-      (p.sku || "").toLowerCase().startsWith(q) ||
-      (p.brand || "").toLowerCase().includes(q) ||
-      (p.category || "").toLowerCase().includes(q) ||
-      (p.supplier || "").toLowerCase().includes(q)
-    );
-  }).slice(0, 12);
+  const results = (query.trim().length === 0 && skuQuery.trim().length === 0) ? [] : (() => {
+    const q  = query.trim().toLowerCase();
+    const sq = skuQuery.trim().toLowerCase();
+
+    return products
+      .filter(p => {
+        const nameMatch = q
+          ? (p.name.toLowerCase().includes(q) ||
+             (p.brand || "").toLowerCase().includes(q) ||
+             (p.category || "").toLowerCase().includes(q) ||
+             (p.supplier || "").toLowerCase().includes(q))
+          : true;
+        const skuMatch = sq
+          ? (p.sku || "").toLowerCase().includes(sq)
+          : true;
+        // Both filled → AND; only one filled → just that one
+        if (q && sq) return nameMatch && skuMatch;
+        if (sq) return skuMatch;
+        return nameMatch;
+      })
+      .sort((a, b) => {
+        // When SKU box is active, rank by SKU match first
+        if (sq) {
+          const aS = (a.sku||"").toLowerCase().startsWith(sq) ? 0 : (a.sku||"").toLowerCase().includes(sq) ? 1 : 2;
+          const bS = (b.sku||"").toLowerCase().startsWith(sq) ? 0 : (b.sku||"").toLowerCase().includes(sq) ? 1 : 2;
+          if (aS !== bS) return aS - bS;
+        }
+        // When name box is active, rank by name match first
+        if (q) {
+          const aR = a.name.toLowerCase().startsWith(q) ? 0 : a.name.toLowerCase().includes(q) ? 1 : 2;
+          const bR = b.name.toLowerCase().startsWith(q) ? 0 : b.name.toLowerCase().includes(q) ? 1 : 2;
+          if (aR !== bR) return aR - bR;
+        }
+        return a.name.localeCompare(b.name);
+      })
+      .slice(0, 12);
+  })();
 
   // When a product is selected, compute full analytics
   const buildStats = (p) => {
@@ -6136,25 +6430,45 @@ const ProductSearch = ({ products, sales, purchases, isAdmin, setActiveTab, setI
       <div style={{ background:"linear-gradient(135deg,#1e1b4b,#312e81)", borderRadius:20, padding:"24px 24px 20px", marginBottom:20 }}>
         <h2 style={{ color:"white", fontWeight:800, fontSize:20, marginBottom:4 }}>🔍 Product Lookup</h2>
         <p style={{ color:"rgba(255,255,255,0.5)", fontSize:12.5, marginBottom:16 }}>
-          Name, SKU code, brand, category, ya supplier se search karo
+          Name ya SKU code se alag alag search karo
         </p>
-        <div style={{ position:"relative" }}>
-          <input
-            ref={inputRef}
-            className="input"
-            value={query}
-            onChange={e => { setQuery(e.target.value); setSelected(null); }}
-            placeholder="🔎  e.g.  lux, TS-001, tirupur, underwear..."
-            style={{ fontSize:16, padding:"13px 16px 13px 44px", borderRadius:12, border:"none",
-              boxShadow:"0 0 0 3px rgba(168,85,247,0.3)", background:"white" }}
-          />
-          <span style={{ position:"absolute", left:14, top:"50%", transform:"translateY(-50%)", fontSize:18, pointerEvents:"none" }}>🔍</span>
-          {query && (
-            <button onClick={()=>{setQuery("");setSelected(null);inputRef.current?.focus();}}
-              style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", background:"#e5e7eb", border:"none", borderRadius:6, width:26, height:26, cursor:"pointer", fontSize:14, color:"#6b7280" }}>
-              ✕
-            </button>
-          )}
+        <div style={{ display:"flex", gap:10 }}>
+          {/* Name search */}
+          <div style={{ position:"relative", flex:2 }}>
+            <input
+              ref={inputRef}
+              className="input"
+              value={query}
+              onChange={e => { setQuery(e.target.value); setSelected(null); }}
+              placeholder="👕  Product naam... (shirt, baniyan...)"
+              style={{ fontSize:14, padding:"12px 36px 12px 14px", borderRadius:12, border:"none",
+                boxShadow:"0 0 0 3px rgba(168,85,247,0.3)", background:"white", width:"100%" }}
+            />
+            {query && (
+              <button onClick={()=>{setQuery("");setSelected(null);inputRef.current?.focus();}}
+                style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", background:"#e5e7eb", border:"none", borderRadius:6, width:22, height:22, cursor:"pointer", fontSize:12, color:"#6b7280" }}>
+                ✕
+              </button>
+            )}
+          </div>
+          {/* SKU search */}
+          <div style={{ position:"relative", flex:1 }}>
+            <input
+              ref={skuRef}
+              className="input"
+              value={skuQuery}
+              onChange={e => { setSkuQuery(e.target.value); setSelected(null); }}
+              placeholder="🏷️  SKU code... (SH-001)"
+              style={{ fontSize:14, padding:"12px 36px 12px 14px", borderRadius:12, border:"none",
+                boxShadow:"0 0 0 3px rgba(99,102,241,0.25)", background:"white", width:"100%" }}
+            />
+            {skuQuery && (
+              <button onClick={()=>{setSkuQuery("");setSelected(null);skuRef.current?.focus();}}
+                style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", background:"#e5e7eb", border:"none", borderRadius:6, width:22, height:22, cursor:"pointer", fontSize:12, color:"#6b7280" }}>
+                ✕
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -6212,10 +6526,10 @@ const ProductSearch = ({ products, sales, purchases, isAdmin, setActiveTab, setI
         </div>
       )}
 
-      {!selected && query.trim().length > 0 && results.length === 0 && (
+      {!selected && (query.trim().length > 0 || skuQuery.trim().length > 0) && results.length === 0 && (
         <div className="card" style={{ textAlign:"center", padding:40 }}>
           <div style={{ fontSize:40, marginBottom:12 }}>🔍</div>
-          <p style={{ fontWeight:700, fontSize:16, color:"#374151", marginBottom:6 }}>"{query}" nahi mila</p>
+          <p style={{ fontWeight:700, fontSize:16, color:"#374151", marginBottom:6 }}>"{query || skuQuery}" nahi mila</p>
           <p style={{ color:"#9ca3af", fontSize:13 }}>Name, SKU, brand ya supplier se try karo</p>
           {isAdmin && (
             <button className="btn btn-primary" style={{ marginTop:14 }}
@@ -6226,7 +6540,7 @@ const ProductSearch = ({ products, sales, purchases, isAdmin, setActiveTab, setI
         </div>
       )}
 
-      {!selected && !query && (
+      {!selected && !query && !skuQuery && (
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:12 }}>
           {[
             { label:"Total Products", val:products.length, icon:"📦", color:"#7c3aed" },
