@@ -1834,7 +1834,7 @@ const BillHistory = ({ sales, setSales, products, setProducts, customers, setCus
   };
 
   const totalAmt = filtered.reduce((a, s) => a + getCurrentVersion(s).total, 0);
-  const totalDisc = filtered.reduce((a, s) => { const v = getCurrentVersion(s); return a + (v.discount||0); }, 0);
+  const totalDisc = filtered.reduce((a, s) => { const sm = calcBillSummary(getCurrentVersion(s).items ? getCurrentVersion(s) : s); return a + (sm.totalSavings || 0); }, 0);
 
   return (
     <div className="page">
@@ -1935,6 +1935,7 @@ const BillHistory = ({ sales, setSales, products, setProducts, customers, setCus
             {[...grouped[date]].sort((a,b) => (getCurrentVersion(b).date||b.date||"").localeCompare(getCurrentVersion(a).date||a.date||"")||b.id-a.id).map(sale => {
               const v = getCurrentVersion(sale);
               const hasVersions = (sale.versions?.length||1) > 1;
+              const cardSummary = calcBillSummary(v.items ? v : sale);
               const borderColor = v.type==="return"?"#fecaca":v.type==="replace"?"#fde68a":"#f3f4f6";
               return (
                 <div key={sale.id} onClick={()=>setGlobalInvoiceSale(sale)}
@@ -1965,7 +1966,7 @@ const BillHistory = ({ sales, setSales, products, setProducts, customers, setCus
                   {/* Amount */}
                   <div style={{ textAlign:"right", flexShrink:0 }}>
                     <div style={{ fontSize:16, fontWeight:800, color:"#059669" }}>₹{v.total.toLocaleString()}</div>
-                    {(v.discount||0) > 0 && <div style={{ fontSize:10.5, color:"#dc2626", fontWeight:600 }}>−₹{v.discount} off</div>}
+                    {cardSummary.totalSavings > 0 && <div style={{ fontSize:10.5, color:"#dc2626", fontWeight:600 }}>−₹{cardSummary.totalSavings.toLocaleString()} off</div>}
                     {(() => { const raw = getCurrentVersion(sale).date||sale.date||""; if (raw.length > 10) { try { const d = new Date(raw); return !isNaN(d) ? <div style={{ fontSize:10, color:"#9ca3af", marginTop:2 }}>{d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}</div> : null; } catch {} } return null; })()}
                     <div style={{ fontSize:10, color:"#c4b5fd", marginTop:1 }}>tap →</div>
                   </div>

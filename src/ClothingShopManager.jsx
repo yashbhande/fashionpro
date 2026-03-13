@@ -2901,7 +2901,8 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
           {/* Category */}
           <select className="select" style={{ width:140, padding:"6px 10px", fontSize:12.5 }} value={catFilter} onChange={e => setCatFilter(e.target.value)}>
             <option value="All">All Categories</option>
-            {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+            {/* Default + any custom categories from products */}
+            {[...new Set([...CATEGORIES, ...products.map(p=>p.category).filter(c=>c && !CATEGORIES.includes(c))])].map(c => <option key={c}>{c}</option>)}
           </select>
           {/* Sort */}
           <select className="select" value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{ width:"auto", padding:"6px 10px", fontSize:12.5 }}>
@@ -3097,7 +3098,22 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
               {/* Basic info */}
               <div className="form-row form-row-2">
                 <div><label className="label">Product Name *</label><input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Lux Cozi Underwear" /></div>
-                <div><label className="label">Category</label><select className="select" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></div>
+                <div><label className="label">Category</label>
+                  <div style={{ display:"flex", gap:6 }}>
+                    <select className="select" style={{ flex:1 }} value={CATEGORIES.includes(form.category) ? form.category : "__custom__"}
+                      onChange={e => {
+                        if (e.target.value === "__custom__") setForm({ ...form, category: "" });
+                        else setForm({ ...form, category: e.target.value });
+                      }}>
+                      {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                      <option value="__custom__">+ Nai Category...</option>
+                    </select>
+                    {!CATEGORIES.includes(form.category) && (
+                      <input className="input" style={{ flex:1 }} placeholder="Category naam likho" value={form.category}
+                        onChange={e => setForm({ ...form, category: e.target.value })} autoFocus />
+                    )}
+                  </div>
+                </div>
               </div>
               <div className="form-row form-row-2">
                 <div><label className="label">Brand</label><input className="input" value={form.brand} onChange={e => setForm({ ...form, brand: e.target.value })} placeholder="e.g. Lux Cozi" /></div>
@@ -4961,10 +4977,21 @@ const Purchases = ({ purchases, setPurchases, products, setProducts, showToast }
                 </div>
                 <div>
                   <label className="label">Category</label>
-                  <select className="select" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
-                    <option value="">Select</option>
-                    {CATEGORIES.map(c => <option key={c}>{c}</option>)}
-                  </select>
+                  <div style={{ display:"flex", gap:6 }}>
+                    <select className="select" style={{ flex:1 }} value={CATEGORIES.includes(form.category) ? form.category : (form.category ? "__custom__" : "")}
+                      onChange={e => {
+                        if (e.target.value === "__custom__") setForm({ ...form, category: "" });
+                        else setForm({ ...form, category: e.target.value });
+                      }}>
+                      <option value="">Select</option>
+                      {[...new Set([...CATEGORIES, ...products.map(p=>p.category).filter(c=>c && !CATEGORIES.includes(c))])].map(c => <option key={c}>{c}</option>)}
+                      <option value="__custom__">+ Nai Category...</option>
+                    </select>
+                    {form.category && !CATEGORIES.includes(form.category) && (
+                      <input className="input" style={{ flex:1 }} placeholder="Category naam" value={form.category}
+                        onChange={e => setForm({ ...form, category: e.target.value })} />
+                    )}
+                  </div>
                 </div>
               </div>
 
