@@ -88,6 +88,34 @@ const toISTDateSlice = (rawDate) => {
   return rawDate.slice(0, 10);
 };
 
+// BUG: Invoice display mein date/time gलत timezone show ho rahe the (different devices par different dates dikha rahe the)
+// FIX: UTC ISO string ko IST mein convert karke display karo — yeh sab devices par consistent hoga
+const formatISTDate = (rawDate) => {
+  if (!rawDate) return "";
+  try {
+    const d = new Date(rawDate);
+    if (isNaN(d)) return rawDate;
+    // UTC ko IST mein convert karo
+    const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
+    return ist.toLocaleDateString("en-IN", {weekday:"long", day:"numeric", month:"long", year:"numeric"});
+  } catch {
+    return rawDate;
+  }
+};
+
+const formatISTTime = (rawDate) => {
+  if (!rawDate) return "";
+  try {
+    const d = new Date(rawDate);
+    if (isNaN(d) || rawDate.length <= 10) return "";
+    // UTC ko IST mein convert karo
+    const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
+    return ist.toLocaleTimeString("en-IN", {hour:"2-digit", minute:"2-digit"});
+  } catch {
+    return "";
+  }
+};
+
 // ── Search relevance sort — startsWith > includes, then alpha ──
 // Usage: arr.filter(...).sort((a,b) => searchSort(a.name, b.name, query))
 const searchSort = (aStr, bStr, q) => {
@@ -561,8 +589,8 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
 
   const vTypeLabel = { original: { text: "Original", color: "#6b7280" }, replace: { text: "🔄 Replaced", color: "#d97706" }, return: { text: "↩️ Returned", color: "#dc2626" } };
 
-  const billDate = (() => { try { const d = new Date(cv.date||curSale.date); return isNaN(d) ? cv.date||curSale.date||"" : d.toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"}); } catch { return cv.date||curSale.date||""; }})();
-  const billTime = (() => { try { const d = new Date(cv.date||curSale.date); const raw = cv.date||curSale.date||""; return (!isNaN(d) && raw.length > 10) ? d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}) : ""; } catch { return ""; }})();
+  const billDate = formatISTDate(cv.date||curSale.date);
+  const billTime = formatISTTime(cv.date||curSale.date);
 
   return (
     <div className="modal-overlay" onClick={e => e.target===e.currentTarget && onClose()}>
@@ -1666,7 +1694,13 @@ export default function App() {
             </button>
             <div>
               <h2 style={{ fontSize: 17, fontWeight: 700, color: "#1f2937" }}>{navItems.find(n => n.id === activeTab)?.label}</h2>
-              <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 1 }}>{new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</p>
+              <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 1 }}>
+                {(() => {
+                  const now = new Date();
+                  const istNow = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+                  return istNow.toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+                })()}
+              </p>
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -2202,7 +2236,7 @@ const BillHistory = ({ sales, setSales, products, setProducts, customers, setCus
                   <div style={{ textAlign:"right", flexShrink:0 }}>
                     <div style={{ fontSize:16, fontWeight:800, color:"#059669" }}>₹{v.total.toLocaleString()}</div>
                     {cardSummary.totalSavings > 0 && <div style={{ fontSize:10.5, color:"#dc2626", fontWeight:600 }}>−₹{cardSummary.totalSavings.toLocaleString()} off</div>}
-                    {(() => { const raw = getCurrentVersion(sale).date||sale.date||""; if (raw.length > 10) { try { const d = new Date(raw); return !isNaN(d) ? <div style={{ fontSize:10, color:"#9ca3af", marginTop:2 }}>{d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}</div> : null; } catch {} } return null; })()}
+                    {(() => { const raw = getCurrentVersion(sale).date||sale.date||""; if (raw.length > 10) { try { const d = new Date(raw); const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000); return !isNaN(d) ? <div style={{ fontSize:10, color:"#9ca3af", marginTop:2 }}>{ist.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}</div> : null; } catch {} } return null; })()}
                     <div style={{ fontSize:10, color:"#c4b5fd", marginTop:1 }}>tap →</div>
                   </div>
                 </div>
@@ -2467,7 +2501,14 @@ const loadJsPDF = () => new Promise((resolve, reject) => {
 });
 
 // Date helpers — used in PDF + WhatsApp text
-const parseBillDate = (d) => { if (!d) return new Date(); const dt = new Date(d); return isNaN(dt) ? new Date() : dt; };
+// BUG FIX: Convert UTC to IST before formatting
+const parseBillDate = (d) => {
+  if (!d) return new Date();
+  const dt = new Date(d);
+  if (isNaN(dt)) return new Date();
+  // Convert UTC to IST
+  return new Date(dt.getTime() + 5.5 * 60 * 60 * 1000);
+};
 const fmtBillDate = (d) => parseBillDate(d).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
 const fmtBillTime = (d) => parseBillDate(d).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 // Global friendly date formatter — ISO string ko "9 Mar 2026" format mein
@@ -2476,7 +2517,9 @@ const fmtDateFriendly = (raw) => {
   try {
     const d = new Date(raw);
     if (isNaN(d)) return raw;
-    return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+    // Convert UTC to IST
+    const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
+    return ist.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
   } catch { return raw; }
 };
 
@@ -4256,7 +4299,7 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
                 <tbody>
                   {[...( priceHistoryProduct.priceHistory || [])].reverse().map((h, i) => (
                     <tr key={i}>
-                      <td style={{ whiteSpace: "nowrap" }}>{(() => { try { const d = new Date(h.date); return isNaN(d) ? h.date : d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }); } catch { return h.date; } })()}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>{(() => { try { const d = new Date(h.date); const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000); return isNaN(d) ? h.date : ist.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }); } catch { return h.date; } })()}</td>
                       <td>{h.supplier || "—"}</td>
                       <td style={{ fontWeight: 700, color: "#dc2626" }}>₹{h.purchasePrice}</td>
                       <td style={{ color: "#6b7280" }}>{h.mrp ? `₹${h.mrp}` : "—"}</td>
@@ -5881,7 +5924,7 @@ const Purchases = ({ purchases, setPurchases, products, setProducts, showToast }
               {[...purchases].sort((a,b) => (b.date||"").localeCompare(a.date||"")||b.id-a.id).map(p => (
                 <tr key={p.id}>
                   <td style={{ color: "#6b7280", whiteSpace: "nowrap", fontSize: 11 }}>
-                    {(() => { try { const d = new Date(p.date); return isNaN(d) ? p.date : <><div>{d.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"})}</div><div style={{fontSize:10,color:"#9ca3af"}}>{d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}</div></>; } catch { return p.date; }})()}
+                    {(() => { try { const d = new Date(p.date); const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000); return isNaN(d) ? p.date : <><div>{ist.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"})}</div><div style={{fontSize:10,color:"#9ca3af"}}>{ist.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}</div></>; } catch { return p.date; }})()}
                   </td>
                   <td style={{ fontWeight: 600 }}>{p.supplier}</td>
                   <td>
@@ -7950,8 +7993,10 @@ const WhatsAppBroadcast = ({ customers, sales, shopName, showToast }) => {
   const fmtSentTime = (iso) => {
     if (!iso) return null;
     const d = new Date(iso);
-    return d.toLocaleDateString("en-IN", { day:"numeric", month:"short", year:"numeric" }) +
-           ", " + d.toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit" });
+    // Convert UTC to IST
+    const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
+    return ist.toLocaleDateString("en-IN", { day:"numeric", month:"short", year:"numeric" }) +
+           ", " + ist.toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit" });
   };
 
   const getCustomerSales = (phone) => sales.filter(s => s.phone === phone);
