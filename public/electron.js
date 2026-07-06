@@ -1,6 +1,10 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
-const isDev = require('electron-is-dev');
+// FIX: 'electron-is-dev' package devDependencies mein tha, isliye production build
+// (.exe) mein woh bundle hi nahi hota — app khulte hi "Cannot find module" crash ho
+// jaata tha. Electron khud batata hai app packaged hai ya nahi (app.isPackaged),
+// isliye koi extra package ki zaroorat hi nahi — yeh hamesha kaam karega.
+const isDev = !app.isPackaged;
 
 function createWindow() {
   const win = new BrowserWindow({
