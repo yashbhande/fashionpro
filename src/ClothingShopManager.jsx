@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection, writeBatch, enableIndexedDbPersistence, runTransaction } from "firebase/firestore";
+import * as XLSX from "xlsx"; // Excel export ke liye — "npm install" karne par apne aap aa jaayega
 
 // ============================================================
 // FIREBASE SETUP
@@ -91,6 +92,22 @@ const saveSingle = async (colName, item) => {
   }
 };
 
+// ── Shop Settings — Firebase mein save/load karo (sab devices pe sync) ──
+const saveShopSettings = async (settings) => {
+  try {
+    await setDoc(doc(db, "meta", "shopSettings"), settings);
+    // Also save to localStorage for offline fallback
+    try {
+      localStorage.setItem('shopName', settings.name || "");
+      localStorage.setItem('shopAddress', settings.address || "");
+      localStorage.setItem('shopPhone', settings.phone || "");
+      localStorage.setItem('shopGst', settings.gst || "");
+    } catch(e) {}
+  } catch(e) {
+    if (e.code !== "unavailable") console.error("Shop settings save error:", e);
+  }
+};
+
 // ============================================================
 // DATA STORE (In-memory, persistent via state)
 // ============================================================
@@ -147,18 +164,21 @@ const Icon = ({ name, size = 18 }) => {
 // LOGIN SCREEN
 // ============================================================
 const LoginScreen = ({ onLogin }) => {
-  const [user, setUser] = useState("admin");
+  const [showAdminPass, setShowAdminPass] = useState(false); // password field sirf Admin click karne par dikhta hai
   const [pass, setPass] = useState("");
   const [err, setErr] = useState("");
   const [shake, setShake] = useState(false);
 
-  const handleLogin = () => {
-    if (user === "admin" && pass === "shop123") {
+  const handleGuestLogin = () => onLogin({ name: "Staff", role: "staff" }); // ek click — no password
+  const handleAdminLogin = () => {
+    // Case-insensitive — SHOP123, shop123, Shop123 sab chalega
+    const p = pass.trim().toLowerCase();
+    if (p === "shop123") {
       onLogin({ name: "Admin", role: "admin" });
-    } else if (user === "staff" && pass === "staff123") {
-      onLogin({ name: "Staff", role: "staff" });
+    } else if (p === "yash123") {
+      onLogin({ name: "Admin", role: "admin", vanity: true });
     } else {
-      setErr("Invalid credentials. Try admin/shop123 or staff/staff123");
+      setErr("Galat password!");
       setShake(true);
       setTimeout(() => setShake(false), 600);
     }
@@ -174,6 +194,8 @@ const LoginScreen = ({ onLogin }) => {
         .shake { animation: shake 0.5s ease; }
         .login-btn { background: linear-gradient(135deg, #f093fb, #f5576c); border: none; color: white; padding: 14px; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer; width: 100%; transition: all 0.3s; letter-spacing: 0.5px; }
         .login-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(240,147,251,0.4); }
+        .login-btn-outline { background: rgba(255,255,255,0.06); border: 1.5px solid rgba(255,255,255,0.2); color: white; padding: 14px; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer; width: 100%; transition: all 0.3s; letter-spacing: 0.5px; }
+        .login-btn-outline:hover { background: rgba(255,255,255,0.12); transform: translateY(-2px); }
         .login-input { width: 100%; background: rgba(255,255,255,0.07); border: 1.5px solid rgba(255,255,255,0.15); color: white; padding: 13px 16px; border-radius: 12px; font-size: 14px; outline: none; box-sizing: border-box; transition: border 0.2s; font-family: 'DM Sans', sans-serif; }
         .login-input:focus { border-color: rgba(240,147,251,0.6); }
         .login-input::placeholder { color: rgba(255,255,255,0.35); }
@@ -184,19 +206,30 @@ const LoginScreen = ({ onLogin }) => {
           <h1 style={{ fontFamily: "'Playfair Display', serif", color: "white", fontSize: 28, margin: "0 0 6px", fontWeight: 700 }}>FashionPro</h1>
           <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 13, margin: 0 }}>Clothing Shop Management System</p>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div>
-            <label style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 500, display: "block", marginBottom: 6, letterSpacing: "0.5px", textTransform: "uppercase" }}>Username</label>
-            <input className="login-input" value={user} onChange={e => setUser(e.target.value)} placeholder="Enter username" />
+
+        {!showAdminPass ? (
+          // Default screen — no password needed at all. Ek click mein andar.
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <button className="login-btn" onClick={handleGuestLogin}>👤 Guest Login (Billing ke liye)</button>
+            <button className="login-btn-outline" onClick={() => { setShowAdminPass(true); setErr(""); }}>👑 Admin Login</button>
+            <p style={{ color: "rgba(255,255,255,0.35)", fontSize: 11, textAlign: "center", margin: "4px 0 0" }}>
+              Guest ko billing/inventory dikhega, par purchase price, margin, profit jaisi private details nahi dikhengi.
+            </p>
           </div>
-          <div>
-            <label style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 500, display: "block", marginBottom: 6, letterSpacing: "0.5px", textTransform: "uppercase" }}>Password</label>
-            <input className="login-input" type="password" value={pass} onChange={e => setPass(e.target.value)} onKeyDown={e => e.key === "Enter" && handleLogin()} placeholder="Enter password" />
+        ) : (
+          // Admin ke liye sirf password — username fixed hai
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div>
+              <label style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 500, display: "block", marginBottom: 6, letterSpacing: "0.5px", textTransform: "uppercase" }}>Admin Password</label>
+              <input autoFocus className="login-input" type="password" value={pass} onChange={e => setPass(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAdminLogin()} placeholder="Password daalo" />
+            </div>
+            {err && <p style={{ color: "#f5576c", fontSize: 12, margin: "0", textAlign: "center" }}>{err}</p>}
+            <button className="login-btn" onClick={handleAdminLogin}>Sign In →</button>
+            <button className="login-btn-outline" onClick={() => { setShowAdminPass(false); setPass(""); setErr(""); }} style={{ padding: "10px" }}>← Wapas</button>
           </div>
-          {err && <p style={{ color: "#f5576c", fontSize: 12, margin: "0", textAlign: "center" }}>{err}</p>}
-          <button className="login-btn" onClick={handleLogin} style={{ marginTop: 8 }}>Sign In →</button>
-        </div>
-        <p style={{ color: "rgba(255,255,255,0.3)", fontSize: 11, textAlign: "center", marginTop: 24, marginBottom: 0 }}>Admin: admin/shop123 &nbsp;|&nbsp; Staff: staff/staff123</p>
+        )}
+
+        <p style={{ color: "rgba(255,255,255,0.3)", fontSize: 11, textAlign: "center", marginTop: 24, marginBottom: 0 }}>FashionPro &copy; 2025</p>
       </div>
     </div>
   );
@@ -412,9 +445,12 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
     // Stock wapas karo
     if (setProducts) {
       returnedItems.forEach(retItem => {
-        if (!retItem.productId) return;
         setProducts(prev => prev.map(p => {
-          if (p.id !== retItem.productId) return p;
+          // Match by productId first, fallback to name match (quick-add items ke liye)
+          const matched = retItem.productId
+            ? p.id === retItem.productId
+            : p.name?.toLowerCase() === retItem.name?.toLowerCase();
+          if (!matched) return p;
           const newQty = p.quantity + retItem.returnedQty;
           if (p.pricingType === "size-variant" && retItem.size && retItem.size !== "-" && p.sizeVariants?.length) {
             const newVariants = p.sizeVariants.map(sv =>
@@ -643,7 +679,9 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
                         {item.replacedFrom && <span style={{ fontSize:10, color:"#f59e0b", marginLeft:4 }}>🔄</span>}
                       </div>
                       <div style={{ fontSize:10.5, color:"#9ca3af", marginTop:2 }}>
-                        {[item.size&&item.size!=="-"?`${item.size}`:"", item.color&&item.color!=="-"?`${item.color}`:""].filter(Boolean).join(" / ")||"—"}
+                        {item.sku && <span style={{ color:"#7c3aed", fontWeight:700 }}>{item.sku.toUpperCase()}</span>}
+                        {item.sku && ([item.size&&item.size!=="-"?item.size:"", item.color&&item.color!=="-"?item.color:""].filter(Boolean).length > 0) ? " • " : ""}
+                        {[item.size&&item.size!=="-"?`${item.size}`:"", item.color&&item.color!=="-"?`${item.color}`:""].filter(Boolean).join(" / ")||(item.sku?"":"—")}
                         {item.replacedFrom && <span style={{ color:"#f59e0b", display:"block" }}>was: {item.replacedFrom}</span>}
                       </div>
                     </div>
@@ -959,7 +997,13 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
 export default function App() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
-  const [activeTab, setActiveTab] = useState("dashboard");
+  // Guest ↔ Admin quick-switch popover (top-right corner badge se) — hooks declare
+  // yahan karna zaroori hai (early "if (!loggedIn) return" se PEHLE), warna Rules of
+  // Hooks todhta hai.
+  const [showRoleSwitch, setShowRoleSwitch] = useState(false);
+  const [roleSwitchPass, setRoleSwitchPass] = useState("");
+  const [roleSwitchErr, setRoleSwitchErr] = useState("");
+  const [activeTab, setActiveTab] = useState("billing"); // App khulte hi seedha Billing — dashboard nahi, taaki time bache
   const [highlightPhone, setHighlightPhone] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   // Global invoice drawer — any component can open an invoice
@@ -976,8 +1020,15 @@ export default function App() {
   const [shopName, setShopName] = useState(() => {
     try { return localStorage.getItem('shopName') || "JB Fashion"; } catch { return "JB Fashion"; }
   });
+  const [shopSettings, setShopSettings] = useState(() => ({
+    name: (() => { try { return localStorage.getItem('shopName') || "JB Fashion"; } catch { return "JB Fashion"; } })(),
+    address: (() => { try { return localStorage.getItem('shopAddress') || ""; } catch { return ""; } })(),
+    phone: (() => { try { return localStorage.getItem('shopPhone') || ""; } catch { return ""; } })(),
+    gst: (() => { try { return localStorage.getItem('shopGst') || ""; } catch { return ""; } })(),
+  }));
   const [billCounter, setBillCounterState] = useState(5);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const { printerConnected, printerSupported, connectPrinter } = usePrinterStatus();
   const [pendingQueue, setPendingQueue] = useState(() => {
     try { return JSON.parse(localStorage.getItem("fp_offline_queue") || "[]"); } catch { return []; }
   });
@@ -1079,6 +1130,21 @@ export default function App() {
       if (snap.exists()) setCustomSizesState(snap.data().sizes || []);
     }, () => {});
     unsubs.push(unsub2);
+    // shopSettings — Firebase se real-time sync (sab devices pe ek jaisi settings)
+    const unsub3 = onSnapshot(doc(db, "meta", "shopSettings"), snap => {
+      if (snap.exists()) {
+        const s = snap.data();
+        setShopSettings(s);
+        if (s.name) {
+          setShopName(s.name);
+          try { localStorage.setItem('shopName', s.name); } catch(e) {}
+        }
+        if (s.address) { try { localStorage.setItem('shopAddress', s.address); } catch(e) {} }
+        if (s.phone)   { try { localStorage.setItem('shopPhone', s.phone); } catch(e) {} }
+        if (s.gst)     { try { localStorage.setItem('shopGst', s.gst); } catch(e) {} }
+      }
+    }, () => {});
+    unsubs.push(unsub3);
     return () => unsubs.forEach(u => u());
   }, []);
 
@@ -1169,6 +1235,19 @@ export default function App() {
   if (!loggedIn) return <LoginScreen onLogin={u => { setCurrentUser(u); setLoggedIn(true); }} />;
 
   const isAdmin = currentUser?.role === "admin";
+  const isVanity = currentUser?.vanity === true; // "yash123" se login — sirf Dashboard ke numbers ko boost karne ke liye
+  const handleRoleSwitchToAdmin = () => {
+    const p = roleSwitchPass.trim().toLowerCase(); // case-insensitive — SHOP123/shop123 dono chalega
+    if (p === "shop123") {
+      setCurrentUser({ name: "Admin", role: "admin" });
+      setShowRoleSwitch(false); setRoleSwitchPass(""); setRoleSwitchErr("");
+    } else if (p === "yash123") {
+      setCurrentUser({ name: "Admin", role: "admin", vanity: true });
+      setShowRoleSwitch(false); setRoleSwitchPass(""); setRoleSwitchErr("");
+    } else {
+      setRoleSwitchErr("Galat password!");
+    }
+  };
 
   // Auto SKU generator — alphabetical sequence: a,b,...z, aa,ab,...az, ba,...zz, aaa,...
   const generateSKU = (allProducts) => {
@@ -1534,6 +1613,16 @@ export default function App() {
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            {/* ── Printer connection indicator (WebUSB) ── */}
+            {printerSupported && (
+              <div
+                onClick={!printerConnected ? connectPrinter : undefined}
+                title={printerConnected ? "Printer connected — power off/on hone par auto update hoga" : "Printer connect karne ke liye click karo (ek baar pair karna hoga)"}
+                style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 12px", borderRadius:10, fontSize:12.5, fontWeight:600, background: printerConnected ? "#ecfdf5" : "#f3f4f6", color: printerConnected ? "#059669" : "#6b7280", border: `1px solid ${printerConnected ? "#bbf7d0" : "#e5e7eb"}`, cursor: printerConnected ? "default" : "pointer", transition:"all 0.3s" }}>
+                <div style={{ width:8, height:8, borderRadius:"50%", background: printerConnected ? "#22c55e" : "#d1d5db", boxShadow: printerConnected ? "0 0 6px #22c55e" : "none" }} />
+                🖨️ {printerConnected ? "Printer Connected" : "Printer Connect Karo"}
+              </div>
+            )}
             {/* ── Online / Offline indicator ── */}
             <div style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 12px", borderRadius:10, fontSize:12.5, fontWeight:600, background: isOnline ? "#ecfdf5" : "#fff7ed", color: isOnline ? "#059669" : "#d97706", border: `1px solid ${isOnline ? "#bbf7d0" : "#fed7aa"}`, transition:"all 0.3s" }}>
               <div style={{ width:8, height:8, borderRadius:"50%", background: isOnline ? "#22c55e" : "#f97316", boxShadow: isOnline ? "0 0 6px #22c55e" : "0 0 6px #f97316" }} />
@@ -1549,12 +1638,42 @@ export default function App() {
                 <Icon name="alert" size={14} /> {lowStockProducts.length} Low Stock
               </div>
             )}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, background: isAdmin ? "#f5f3ff" : "#ecfdf5", padding: "7px 14px", borderRadius: 10 }}>
-              <div style={{ width: 30, height: 30, background: isAdmin ? "linear-gradient(135deg,#7c3aed,#a855f7)" : "linear-gradient(135deg,#059669,#10b981)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontSize: 13, fontWeight: 700 }}>{currentUser?.name?.charAt(0)}</div>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#1f2937" }}>{currentUser?.name}</div>
-                <div style={{ fontSize: 11, color: isAdmin ? "#7c3aed" : "#059669", fontWeight: 600 }}>{isAdmin ? "👑 Admin" : "👤 Staff"}</div>
+            {/* ── Guest ↔ Admin quick switch — click karke role change karo, full logout ki zaroorat nahi ── */}
+            <div style={{ position: "relative" }}>
+              <div
+                onClick={() => {
+                  if (isAdmin) {
+                    // Admin se Guest — turant, koi password nahi chahiye
+                    setCurrentUser({ name: "Staff", role: "staff" });
+                    setShowRoleSwitch(false);
+                  } else {
+                    // Guest se Admin — password chahiye, isliye chhota popover kholo
+                    setShowRoleSwitch(v => !v);
+                  }
+                }}
+                title={isAdmin ? "Click karke Guest mode mein jao" : "Click karke Admin banoo"}
+                style={{ display: "flex", alignItems: "center", gap: 8, background: isAdmin ? "#f5f3ff" : "#ecfdf5", padding: "7px 14px", borderRadius: 10, cursor: "pointer", userSelect: "none" }}
+              >
+                <div style={{ width: 30, height: 30, background: isAdmin ? "linear-gradient(135deg,#7c3aed,#a855f7)" : "linear-gradient(135deg,#059669,#10b981)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontSize: 13, fontWeight: 700 }}>{currentUser?.name?.charAt(0)}</div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1f2937" }}>{currentUser?.name}</div>
+                  <div style={{ fontSize: 11, color: isAdmin ? "#7c3aed" : "#059669", fontWeight: 600 }}>{isAdmin ? "👑 Admin" : "👤 Staff"} <span style={{ color: "#9ca3af", fontWeight: 500 }}>· switch karo</span></div>
+                </div>
               </div>
+              {showRoleSwitch && !isAdmin && (
+                <div style={{ position: "absolute", top: "115%", right: 0, background: "white", border: "1.5px solid #e5e7eb", borderRadius: 12, padding: 14, width: 230, boxShadow: "0 10px 30px rgba(0,0,0,0.12)", zIndex: 100 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 6 }}>Admin Password</label>
+                  <input
+                    autoFocus type="password" value={roleSwitchPass}
+                    onChange={e => setRoleSwitchPass(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && handleRoleSwitchToAdmin()}
+                    placeholder="Password daalo"
+                    style={{ width: "100%", boxSizing: "border-box", border: "1.5px solid #e5e7eb", borderRadius: 8, padding: "8px 10px", fontSize: 13, outline: "none", marginBottom: 8 }}
+                  />
+                  {roleSwitchErr && <p style={{ color: "#dc2626", fontSize: 11.5, margin: "0 0 8px" }}>{roleSwitchErr}</p>}
+                  <button onClick={handleRoleSwitchToAdmin} style={{ width: "100%", background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "white", border: "none", borderRadius: 8, padding: "8px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Admin Banoo →</button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1576,17 +1695,17 @@ export default function App() {
           </div>
         )}
         <div className="page-content">
-          {activeTab === "dashboard" && (isAdmin ? <Dashboard products={products} sales={sales} purchases={purchases} totalRevenue={totalRevenue} totalProfit={totalProfit} todayRevenue={todayRevenue} todaySales={todaySales} lowStockProducts={lowStockProducts} setActiveTab={setActiveTab} shopName={shopName} setGlobalInvoiceSale={setGlobalInvoiceSale} /> : <StaffBlocked />)}
+          {activeTab === "dashboard" && (isAdmin ? <Dashboard products={products} sales={sales} purchases={purchases} totalRevenue={totalRevenue} totalProfit={totalProfit} todayRevenue={todayRevenue} todaySales={todaySales} lowStockProducts={lowStockProducts} setActiveTab={setActiveTab} shopName={shopName} setGlobalInvoiceSale={setGlobalInvoiceSale} vanity={isVanity} /> : <StaffBlocked />)}
           {activeTab === "inventory" && <Inventory products={products} setProducts={setProducts} showToast={showToast} lowStockProducts={lowStockProducts} isAdmin={isAdmin} generateSKU={generateSKU} customSizes={customSizes} inventoryNav={inventoryNav} setInventoryNav={setInventoryNav} sales={sales} />}
           {activeTab === "billing" && <Billing products={products} setProducts={setProducts} sales={sales} setSales={setSales} customers={customers} setCustomers={setCustomers} showToast={showToast} billCounter={billCounter} setBillCounter={setBillCounter} shopName={shopName} isAdmin={isAdmin} setActiveTab={setActiveTab} setHighlightPhone={setHighlightPhone} setGlobalInvoiceSale={setGlobalInvoiceSale} />}
-          {activeTab === "billhistory" && <BillHistory sales={sales} setSales={setSales} products={products} setProducts={setProducts} customers={customers} setCustomers={setCustomers} billCounter={billCounter} setBillCounter={setBillCounter} shopName={shopName} isAdmin={isAdmin} setActiveTab={setActiveTab} setHighlightPhone={setHighlightPhone} setGlobalInvoiceSale={setGlobalInvoiceSale} />}
+          {activeTab === "billhistory" && <BillHistory sales={sales} setSales={setSales} products={products} setProducts={setProducts} customers={customers} setCustomers={setCustomers} billCounter={billCounter} setBillCounter={setBillCounter} shopName={shopName} isAdmin={isAdmin} setActiveTab={setActiveTab} setHighlightPhone={setHighlightPhone} setGlobalInvoiceSale={setGlobalInvoiceSale} showToast={showToast} />}
           {activeTab === "purchases" && (isAdmin ? <Purchases purchases={purchases} setPurchases={setPurchases} products={products} setProducts={setProducts} showToast={showToast} /> : <StaffBlocked />)}
           {activeTab === "customers" && <Customers customers={customers} setCustomers={setCustomers} sales={sales} showToast={showToast} isAdmin={isAdmin} highlightPhone={highlightPhone} setGlobalInvoiceSale={setGlobalInvoiceSale} setAppTab={setActiveTab} setInventoryNav={setInventoryNav} />}
           {activeTab === "productsearch" && <ProductSearch products={products} sales={sales} purchases={purchases} isAdmin={isAdmin} setActiveTab={setActiveTab} setInventoryNav={setInventoryNav} />}
           {activeTab === "reports" && (isAdmin ? <Reports sales={sales} products={products} purchases={purchases} customers={customers} setGlobalInvoiceSale={setGlobalInvoiceSale} /> : <StaffBlocked />)}
           {activeTab === "margin" && (isAdmin ? <MarginAnalysis sales={sales} products={products} setGlobalInvoiceSale={setGlobalInvoiceSale} /> : <StaffBlocked />)}
           {activeTab === "broadcast" && (isAdmin ? <WhatsAppBroadcast customers={customers} sales={sales} shopName={shopName} showToast={showToast} /> : <StaffBlocked />)}
-          {activeTab === "settings" && (isAdmin ? <Settings shopName={shopName} setShopName={setShopName} showToast={showToast} sales={sales} products={products} purchases={purchases} customers={customers} billCounter={billCounter} setSales={setSales} setProducts={setProducts} setPurchases={setPurchases} setCustomers={setCustomers} setBillCounter={setBillCounter} customSizes={customSizes} setCustomSizes={setCustomSizes} /> : <StaffBlocked />)}
+          {activeTab === "settings" && (isAdmin ? <Settings shopName={shopName} setShopName={setShopName} shopSettings={shopSettings} setShopSettings={setShopSettings} showToast={showToast} sales={sales} products={products} purchases={purchases} customers={customers} billCounter={billCounter} setSales={setSales} setProducts={setProducts} setPurchases={setPurchases} setCustomers={setCustomers} setBillCounter={setBillCounter} customSizes={customSizes} setCustomSizes={setCustomSizes} /> : <StaffBlocked />)}
 
           {/* ── GLOBAL INVOICE DRAWER ── */}
           {globalInvoiceSale && (
@@ -1712,7 +1831,7 @@ const calcBillSummary = (billOrVersion) => {
 // ============================================================
 // BILL HISTORY
 // ============================================================
-const BillHistory = ({ sales, setSales, products, setProducts, customers, setCustomers, billCounter, setBillCounter, shopName, isAdmin, setActiveTab, setHighlightPhone, setGlobalInvoiceSale }) => {
+const BillHistory = ({ sales, setSales, products, setProducts, customers, setCustomers, billCounter, setBillCounter, shopName, isAdmin, setActiveTab, setHighlightPhone, setGlobalInvoiceSale, showToast }) => {
   const today = getISTDateStr(); // BUG25 FIX: IST
   const yesterday = getISTDaysAgo(1); // BUG25 FIX: IST
 
@@ -1836,6 +1955,60 @@ const BillHistory = ({ sales, setSales, products, setProducts, customers, setCus
   const totalAmt = filtered.reduce((a, s) => a + getCurrentVersion(s).total, 0);
   const totalDisc = filtered.reduce((a, s) => { const sm = calcBillSummary(getCurrentVersion(s).items ? getCurrentVersion(s) : s); return a + (sm.totalSavings || 0); }, 0);
 
+  // ── EXCEL EXPORT — abhi jo filter/date-range/search lagaya hai, wahi bills export
+  // honge. Do sheets: "Bill Summary" (ek row per bill — jaldi overview ke liye) aur
+  // "Item Details" (ek row per product — SKU ke saath, taaki Excel mein filter/sort
+  // karke jo bhi dekhna ho dekh sako). Simple, clean columns — koi clutter nahi.
+  const exportToExcel = () => {
+    if (filtered.length === 0) { showToast("Export karne ke liye koi bill nahi hai", "error"); return; }
+    const summaryRows = filtered.map(s => {
+      const v = getCurrentVersion(s);
+      return {
+        "Bill No": s.billNo,
+        "Date": (v.date || s.date || "").slice(0, 10),
+        "Customer": s.customer || "Walk-in",
+        "Phone": s.phone || "",
+        "Region": s.region || "",
+        "Type": v.type || "original",
+        "Total Items": (v.items || []).reduce((a, i) => a + (i.qty || 1), 0),
+        "MRP Total (₹)": v.subtotal || 0,
+        "Discount (₹)": v.discount || 0,
+        "Tax (₹)": v.tax || 0,
+        "Final Total (₹)": v.total || 0,
+        "Received (₹)": v.received ?? v.total,
+      };
+    });
+    const itemRows = [];
+    filtered.forEach(s => {
+      const v = getCurrentVersion(s);
+      (v.items || []).forEach(it => {
+        itemRows.push({
+          "Bill No": s.billNo,
+          "Date": (v.date || s.date || "").slice(0, 10),
+          "Customer": s.customer || "Walk-in",
+          "Product": it.name,
+          "SKU": it.sku ? it.sku.toUpperCase() : "",
+          "Size": it.size && it.size !== "-" ? it.size : "",
+          "Color": it.color && it.color !== "-" ? it.color : "",
+          "Qty": it.qty || 1,
+          "Rate (₹)": it.price || 0,
+          "MRP (₹)": it.mrpPerPiece || 0,
+          "Line Total (₹)": (it.price || 0) * (it.qty || 1),
+        });
+      });
+    });
+    const wb = XLSX.utils.book_new();
+    const ws1 = XLSX.utils.json_to_sheet(summaryRows);
+    ws1["!cols"] = [{ wch: 11 }, { wch: 12 }, { wch: 18 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 13 }, { wch: 12 }, { wch: 10 }, { wch: 13 }, { wch: 12 }];
+    const ws2 = XLSX.utils.json_to_sheet(itemRows);
+    ws2["!cols"] = [{ wch: 11 }, { wch: 12 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 7 }, { wch: 10 }, { wch: 10 }, { wch: 13 }];
+    XLSX.utils.book_append_sheet(wb, ws1, "Bill Summary");
+    XLSX.utils.book_append_sheet(wb, ws2, "Item Details");
+    const fname = `FashionPro_Bills_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, fname);
+    showToast(`📊 Excel download ho gayi: ${fname}`);
+  };
+
   return (
     <div className="page">
       <div style={{ marginBottom:16 }}>
@@ -1903,6 +2076,11 @@ const BillHistory = ({ sales, setSales, products, setProducts, customers, setCus
           {(searchText||regionFilter!=="all"||billTypeFilter!=="all"||minAmt||maxAmt) && (
             <button onClick={()=>{setSearchText("");setRegionFilter("all");setBillTypeFilter("all");setMinAmt("");setMaxAmt("");}} style={{ padding:"4px 10px", fontSize:11, color:"#dc2626", border:"1.5px solid #fecaca", borderRadius:8, background:"white", cursor:"pointer", fontWeight:700 }}>✕ Clear</button>
           )}
+          {/* Excel export — jo filter abhi lagaya hai, wahi bills export honge */}
+          <button onClick={exportToExcel} title="Excel mein export karo (jo filter lagaya hai wahi bills)"
+            style={{ marginLeft:"auto", padding:"5px 14px", fontSize:12, fontWeight:700, color:"white", border:"none", borderRadius:8, background:"linear-gradient(135deg,#059669,#10b981)", cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
+            📊 Excel Export
+          </button>
         </div>
       </div>
 
@@ -1986,8 +2164,12 @@ const BillHistory = ({ sales, setSales, products, setProducts, customers, setCus
 // ============================================================
 // DASHBOARD
 // ============================================================
-const Dashboard = ({ products, sales, totalRevenue, totalProfit, todayRevenue, todaySales, lowStockProducts, setActiveTab, purchases, setGlobalInvoiceSale }) => {
+const Dashboard = ({ products, sales, totalRevenue, totalProfit, todayRevenue, todaySales, lowStockProducts, setActiveTab, purchases, setGlobalInvoiceSale, vanity }) => {
   const [dashPeriod, setDashPeriod] = useState("today"); // today | week | month | all
+  // "vanity" — sirf jab "yash123" se login kiya ho, tab yeh Dashboard ke displayed
+  // numbers ko 3x dikhata hai (sirf aura/show ke liye). Yeh koi asli data change nahi
+  // karta — Reports, Excel export, aur baaki sab jagah asli sahi number hi jaate hain.
+  const VMULT = vanity ? 3 : 1;
   const totalStockValue = products.reduce((a, b) => a + b.sellingPrice * b.quantity, 0);
   const totalItems = products.reduce((a, b) => a + b.quantity, 0);
 
@@ -2011,7 +2193,7 @@ const Dashboard = ({ products, sales, totalRevenue, totalProfit, todayRevenue, t
     const d = new Date(); d.setDate(d.getDate() - (6 - i));
     const dateStr = d.toISOString().split("T")[0];
     const dayName = d.toLocaleDateString("en-IN", { weekday: "short" });
-    const total = sales.filter(s => (getCV2(s).date||s.date) === dateStr).reduce((a, b) => a + getCV2(b).total, 0);
+    const total = sales.filter(s => (getCV2(s).date||s.date) === dateStr).reduce((a, b) => a + getCV2(b).total, 0) * VMULT;
     const count = sales.filter(s => (getCV2(s).date||s.date) === dateStr).length;
     return { day: dayName, total, count, date: dateStr };
   });
@@ -2043,9 +2225,9 @@ const Dashboard = ({ products, sales, totalRevenue, totalProfit, todayRevenue, t
   const periodLabel = { today:"Aaj", week:"7 Din", month:"30 Din", all:"Sab Time" }[dashPeriod];
 
   const statCards = [
-    { label: `${periodLabel} — Revenue`, value: `₹${periodRevenue.toLocaleString()}`, sub: `${periodSales.length} bills`, icon: "billing", color: "#7c3aed", bg: "#f5f3ff" },
-    { label: `${periodLabel} — Items Sold`, value: periodItems, sub: `Avg ₹${periodAvg.toLocaleString()}/bill`, icon: "inventory", color: "#059669", bg: "#ecfdf5" },
-    { label: "Total Profit (All Time)", value: `₹${totalProfit.toLocaleString()}`, sub: `Margin: ${totalRevenue > 0 ? Math.round((totalProfit / totalRevenue) * 100) : 0}%`, icon: "rupee", color: "#d97706", bg: "#fffbeb" },
+    { label: `${periodLabel} — Revenue`, value: `₹${(periodRevenue * VMULT).toLocaleString()}`, sub: `${periodSales.length} bills`, icon: "billing", color: "#7c3aed", bg: "#f5f3ff" },
+    { label: `${periodLabel} — Items Sold`, value: Math.round(periodItems * VMULT), sub: `Avg ₹${periodAvg.toLocaleString()}/bill`, icon: "inventory", color: "#059669", bg: "#ecfdf5" },
+    { label: "Total Profit (All Time)", value: `₹${(totalProfit * VMULT).toLocaleString()}`, sub: `Margin: ${totalRevenue > 0 ? Math.round((totalProfit / totalRevenue) * 100) : 0}%`, icon: "rupee", color: "#d97706", bg: "#fffbeb" },
     { label: "Stock Value", value: `₹${totalStockValue.toLocaleString()}`, sub: `${totalItems} items • ${products.length} products`, icon: "trend", color: "#2563eb", bg: "#eff6ff" },
   ];
 
@@ -2246,16 +2428,20 @@ const generatePDFBlob = async (bill, shopName) => {
   const JsPDF = await loadJsPDF();
 
   let SHOP_NAME = "JB Fashion";
-  let SHOP_ADDR1 = "Shop No:1, Bhagwant Complex, Pande Chowk";
-  let SHOP_ADDR2 = "Barshi - 413401";
-  let SHOP_PHONE = "9923970806";
+  let SHOP_ADDR1 = "";
+  let SHOP_ADDR2 = "";
+  let SHOP_PHONE = "";
+  let SHOP_GST   = "";
   try {
-    SHOP_NAME  = localStorage.getItem('shopName')    || "JB Fashion";
-    const addr = localStorage.getItem('shopAddress') || "Shop No:1, Bhagwant Complex, Pande Chowk, Barshi";
-    const parts = addr.split(',');
-    SHOP_ADDR1 = parts.slice(0, -1).join(',').trim() || addr;
-    SHOP_ADDR2 = parts[parts.length - 1].trim() || "Barshi - 413401";
-    SHOP_PHONE = localStorage.getItem('shopPhone') || "9923970806";
+    SHOP_NAME  = localStorage.getItem('shopName')    || shopName || "JB Fashion";
+    const addr = localStorage.getItem('shopAddress') || "";
+    if (addr) {
+      const parts = addr.split(',');
+      SHOP_ADDR1 = parts.slice(0, -1).join(',').trim() || addr;
+      SHOP_ADDR2 = parts[parts.length - 1].trim() || "";
+    }
+    SHOP_PHONE = localStorage.getItem('shopPhone') || "";
+    SHOP_GST   = localStorage.getItem('shopGst')   || "";
   } catch(e) {}
 
   const fmt  = (n) => `Rs.${Number(n).toLocaleString("en-IN")}`;
@@ -2346,6 +2532,7 @@ const generatePDFBlob = async (bill, shopName) => {
   gray(); center(SHOP_ADDR2, y, 6.5, false);
   y += 4;
   if (SHOP_PHONE) { gray(); center(`Ph: ${SHOP_PHONE}`, y, 6.5, false); y += 4; }
+  if (SHOP_GST)   { gray(); center(`GST: ${SHOP_GST}`, y, 6.5, false); y += 4; }
   y += 1;
 
   line(3, y, W - 3, y);
@@ -2703,11 +2890,583 @@ const StaffBlocked = () => (
 // Default blank size variant row
 const blankVariant = () => ({ size: "", purchasePrice: "", mrp: "", sellingPrice: "", stock: "" });
 
+// ============================================================
+// PRINTER CONNECTION STATUS — via WebUSB, auto-detects connect/disconnect
+// ============================================================
+// Note: this uses the WebUSB API (Chrome/Edge only). The printer must be plugged
+// in over USB and "paired" once using the Connect button — after that, Chrome
+// remembers the permission and the app will automatically show Connected/
+// Disconnected as the printer is powered on/off, with no need to re-pair.
+// It cannot detect Bluetooth or network printers, and some thermal printers
+// register as a plain "USB Printer" that the OS driver claims exclusively —
+// in that case the browser can't see it either, and this indicator will just
+// stay "Not Detected" even though normal window.print() still works fine.
+function usePrinterStatus() {
+  const supported = typeof navigator !== "undefined" && !!navigator.usb;
+  const [printerConnected, setPrinterConnected] = useState(false);
+
+  const refreshDevices = React.useCallback(async () => {
+    if (!supported) return;
+    try {
+      const devices = await navigator.usb.getDevices();
+      setPrinterConnected(devices.length > 0);
+    } catch { setPrinterConnected(false); }
+  }, [supported]);
+
+  useEffect(() => {
+    if (!supported) return;
+    refreshDevices();
+    const onChange = () => refreshDevices();
+    navigator.usb.addEventListener("connect", onChange);
+    navigator.usb.addEventListener("disconnect", onChange);
+    return () => {
+      navigator.usb.removeEventListener("connect", onChange);
+      navigator.usb.removeEventListener("disconnect", onChange);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supported]);
+
+  const connectPrinter = async () => {
+    if (!supported) { alert("Yeh browser printer status detect nahi kar sakta. Chrome ya Edge use karo (WebUSB support chahiye)."); return; }
+    try {
+      await navigator.usb.requestDevice({ filters: [] }); // shows OS USB device picker
+      refreshDevices();
+    } catch (e) { /* user cancelled the picker — ignore */ }
+  };
+
+  return { printerConnected, printerSupported: supported, connectPrinter };
+}
+
+// LABEL PRINTER — 79mm × 50mm thermal label with barcode
+// ============================================================
+// Common thermal label sizes shopkeepers use — user can switch since it varies by roll/printer
+const LABEL_SIZES = [
+  { id: "3x2", title: '3" × 2"', wMm: 76, hMm: 51 },
+  { id: "2x2", title: '2" × 2"', wMm: 51, hMm: 51 },
+  { id: "2x1", title: '2" × 1"', wMm: 51, hMm: 25 },
+];
+const DEFAULT_FONT_PT = { name: 8.5, sku: 6, price: 12 };
+// Bold defaults — product name & price bold by default, SKU normal (matches old hardcoded look)
+const DEFAULT_BOLD = { name: true, sku: false, price: true };
+// Font/bold settings are saved PER label size (3x2, 2x1, 2x2 sab alag-alag) so editing one
+// size's font never disturbs another size's saved settings. Persists in localStorage until
+// the user changes it again.
+const LABEL_STYLE_KEY = (sizeId) => `labelStyle_${sizeId}`;
+const loadLabelStyle = (sizeId) => {
+  try {
+    const raw = localStorage.getItem(LABEL_STYLE_KEY(sizeId));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        fontPt: { ...DEFAULT_FONT_PT, ...(parsed.fontPt || {}) },
+        bold: { ...DEFAULT_BOLD, ...(parsed.bold || {}) },
+      };
+    }
+  } catch { /* corrupt/old data — fall back to defaults */ }
+  return { fontPt: DEFAULT_FONT_PT, bold: DEFAULT_BOLD };
+};
+const saveLabelStyle = (sizeId, style) => {
+  try { localStorage.setItem(LABEL_STYLE_KEY(sizeId), JSON.stringify(style)); } catch { /* storage full/blocked — ignore */ }
+};
+
+const LabelPrinter = ({ products, onClose, initialProduct = null, initialQty = 1 }) => {
+  const [selectedProduct, setSelectedProduct] = useState(initialProduct);
+  const [selectedVariant, setSelectedVariant] = useState(
+    initialProduct && initialProduct.pricingType === "size-variant" && initialProduct.sizeVariants?.length
+      ? initialProduct.sizeVariants[0]
+      : null
+  ); // for size-variant products
+  const [qty, setQty] = useState(initialQty);
+  const [search, setSearch] = useState("");
+  const [preview, setPreview] = useState(!!initialProduct);
+  // Manual overrides so the label text can be edited before printing
+  const [labelOverride, setLabelOverride] = useState(null); // { name, sku, size, mrp, rate }
+  // Label paper size varies by printer/roll — let the user pick it instead of hardcoding
+  const [labelSizeId, setLabelSizeId] = useState("3x2");
+  const labelSize = LABEL_SIZES.find(s => s.id === labelSizeId) || LABEL_SIZES[0];
+  // Font size + bold for each text element — SAVED SEPARATELY PER LABEL SIZE, so 3x2 aur 2x1
+  // ki settings kabhi mix nahi hoti. Jab tak khud change na karo, wahi saved rehta hai.
+  const [fontPt, setFontPt] = useState(() => loadLabelStyle(labelSizeId).fontPt);
+  const [fontBold, setFontBold] = useState(() => loadLabelStyle(labelSizeId).bold);
+  // Jab label size switch ho (3x2 → 2x1 waghera), uss size ka apna saved style load karo
+  useEffect(() => {
+    const style = loadLabelStyle(labelSizeId);
+    setFontPt(style.fontPt);
+    setFontBold(style.bold);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [labelSizeId]);
+  const bumpFont = (key, delta) => setFontPt(f => {
+    const next = { ...f, [key]: Math.max(4, Math.min(24, +(f[key] + delta).toFixed(1)) ) };
+    saveLabelStyle(labelSizeId, { fontPt: next, bold: fontBold });
+    return next;
+  });
+  const toggleBold = (key) => setFontBold(b => {
+    const next = { ...b, [key]: !b[key] };
+    saveLabelStyle(labelSizeId, { fontPt, bold: next });
+    return next;
+  });
+
+  // Load JsBarcode once (same library used for the print window) so the on-screen
+  // preview can show a REAL barcode instead of a fake placeholder box
+  const [barcodeLibReady, setBarcodeLibReady] = useState(!!window.JsBarcode);
+  useEffect(() => {
+    if (window.JsBarcode) { setBarcodeLibReady(true); return; }
+    const existing = document.getElementById("jsbarcode-cdn-script");
+    if (existing) { existing.addEventListener("load", () => setBarcodeLibReady(true)); return; }
+    const script = document.createElement("script");
+    script.id = "jsbarcode-cdn-script";
+    script.src = "https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js";
+    script.async = true;
+    script.onload = () => setBarcodeLibReady(true);
+    document.head.appendChild(script);
+  }, []);
+
+  const previewBarcodeRef = React.useRef(null);
+
+  // Search products by SKU or name — exact/startsWith matches ranked to the top,
+  // so searching "a" shows products starting with "a" before ones that merely contain it.
+  const filtered = products
+    .filter(p =>
+      p.name?.toLowerCase().includes(search.toLowerCase()) ||
+      (p.sku || "").toLowerCase().includes(search.toLowerCase())
+    )
+    .sort((a, b) => {
+      const q = search.toLowerCase();
+      const rank = (p) => {
+        const sku = (p.sku || "").toLowerCase();
+        const name = (p.name || "").toLowerCase();
+        if (sku === q) return 0;
+        if (name === q) return 1;
+        if (sku.startsWith(q)) return 2;
+        if (name.startsWith(q)) return 3;
+        if (sku.includes(q)) return 4;
+        if (name.includes(q)) return 5;
+        return 6;
+      };
+      const rA = rank(a), rB = rank(b);
+      if (rA !== rB) return rA - rB;
+      return (a.name || "").localeCompare(b.name || "");
+    })
+    .slice(0, 50);
+
+  // Get effective price info for label
+  const getLabelInfo = (product, variant) => {
+    const name = product.name || "";
+    const sku  = (product.sku || "").toUpperCase();
+    let mrp = 0, rate = 0, size = "";
+    if (product.pricingType === "size-variant" && variant) {
+      mrp  = variant.mrpPerPiece || (variant.mrp > 0 ? Math.round(variant.mrp / (variant.piecesPerBox || 1)) : 0);
+      rate = variant.sellingPrice || 0;
+      size = variant.size || "";
+    } else {
+      const piecesPerPack = product.piecesPerPack || 1;
+      mrp  = product.mrp > 0 ? Math.round(product.mrp / piecesPerPack) : 0;
+      rate = product.sellingPrice || 0;
+      size = (product.sizes || []).join(", ");
+    }
+    const discounted = mrp > 0 && rate < mrp;
+    const base = { name, sku, mrp, rate, size, discounted };
+    // Apply any manual overrides entered on the label edit form
+    if (labelOverride) {
+      const merged = { ...base, ...labelOverride, mrp: +labelOverride.mrp || 0, rate: +labelOverride.rate || 0 };
+      merged.discounted = merged.mrp > 0 && merged.rate < merged.mrp;
+      return merged;
+    }
+    return base;
+  };
+
+  // Render a REAL barcode into the on-screen preview (same JsBarcode lib used for print)
+  // instead of a fake decorative box — this is what removes the confusing solid-black square.
+  useEffect(() => {
+    if (!barcodeLibReady || !selectedProduct || !previewBarcodeRef.current || !window.JsBarcode) return;
+    const info = getLabelInfo(selectedProduct, selectedVariant);
+    const value = info.sku || (info.name || "").substring(0, 12).replace(/\s/g, "");
+    if (!value) return;
+    try {
+      window.JsBarcode(previewBarcodeRef.current, value, {
+        format: "CODE128",
+        width: 1.3,
+        height: Math.max(16, Math.round(labelSize.hMm * 0.5)),
+        displayValue: false,
+        margin: 0,
+        background: "#ffffff",
+        lineColor: "#000000",
+      });
+    } catch { /* invalid characters for barcode — ignore, preview just stays blank */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [barcodeLibReady, selectedProduct, selectedVariant, labelOverride, labelSize.hMm]);
+
+  const selectProduct = (p) => {
+    setSelectedProduct(p);
+    setLabelOverride(null);
+    if (p.pricingType === "size-variant" && p.sizeVariants?.length) {
+      setSelectedVariant(p.sizeVariants[0]);
+    } else {
+      setSelectedVariant(null);
+    }
+    setSearch("");
+    setPreview(true);
+  };
+
+  const printLabels = () => {
+    if (!selectedProduct) return;
+    const info = getLabelInfo(selectedProduct, selectedVariant);
+    // Open print window with label HTML
+    const labelHTML = generateLabelHTML(info, qty);
+    const w = window.open("", "_blank", "width=400,height=600");
+    if (!w) { alert("Popup block hai! Browser settings mein allow karo."); return; }
+    w.document.write(labelHTML);
+    w.document.close();
+    // NOTE: print() ab isi HTML ke andar wale <script> se call hota hai (barcode banne
+    // ke turant baad) — yahan se dobara w.onload set NAHI karte, kyunki wo popup ke
+    // apne onload (jo barcode banata hai) ko OVERWRITE kar deta tha. Isi wajah se
+    // kabhi barcode dikhta tha kabhi nahi (race condition) — ab fix ho gaya.
+  };
+
+  const generateLabelHTML = (info, copies) => {
+    // Barcode: use CODE128 via JsBarcode CDN
+    const { wMm, hMm } = labelSize;
+    const barcodeHeightPx = Math.max(16, Math.round(hMm * 0.5));
+    const labelsArr = Array.from({ length: copies }).map((_, i) => `
+      <div class="label" id="lbl${i}">
+        <div class="shop-name">${localStorage.getItem('shopName') || 'FashionPro'}</div>
+        <div class="prod-name">${info.name}${info.size ? ` — ${info.size}` : ''}</div>
+        <div class="sku">SKU: ${info.sku}</div>
+        <div class="barcode-wrap">
+          <svg class="barcode" id="bc${i}"></svg>
+        </div>
+        <div class="price-row">
+          ${info.discounted
+            ? `<span class="mrp">MRP ₹${info.mrp}</span><span class="rate">₹${info.rate}</span>`
+            : `<span class="rate only">₹${info.rate}</span>`
+          }
+        </div>
+      </div>
+    `).join('');
+
+    const barcodeInits = Array.from({ length: copies }).map((_, i) => `
+      JsBarcode("#bc${i}", "${info.sku || info.name.substring(0,12).replace(/\s/g,'')}", {
+        format: "CODE128",
+        width: 1.3,
+        height: ${barcodeHeightPx},
+        displayValue: false,
+        margin: 0,
+        background: "#ffffff",
+        lineColor: "#000000",
+      });
+    `).join('\n');
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>Labels</title>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: Arial, sans-serif; background: white; }
+  .page { display: flex; flex-wrap: wrap; gap: 2mm; padding: 2mm; }
+  .label {
+    width: ${wMm}mm;
+    height: ${hMm}mm;
+    border: 0.5px solid #ccc;
+    padding: 2mm 2.5mm 1.5mm;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    overflow: hidden;
+    page-break-inside: avoid;
+    background: #ffffff;
+  }
+  .shop-name { font-size: 7pt; font-weight: bold; color: #333; text-align: center; letter-spacing: 0.5px; text-transform: uppercase; }
+  .prod-name { font-size: ${fontPt.name}pt; font-weight: ${fontBold.name ? "bold" : "normal"}; color: #111; text-align: center; line-height: 1.2; max-height: ${Math.round(hMm * 0.32)}mm; overflow: hidden; }
+  .sku { font-size: ${fontPt.sku}pt; font-weight: ${fontBold.sku ? "bold" : "normal"}; color: #666; text-align: center; }
+  .barcode-wrap { width: 100%; display: flex; justify-content: center; background: #ffffff; }
+  .barcode { max-width: ${Math.round(wMm * 0.88)}mm; background: #ffffff; }
+  .price-row { display: flex; align-items: center; gap: 4mm; justify-content: center; }
+  .mrp { font-size: 7pt; color: #888; text-decoration: line-through; }
+  .rate { font-size: ${fontPt.price}pt; font-weight: ${fontBold.price ? "bold" : "normal"}; color: #000; }
+  .rate.only { font-size: ${fontPt.price + 2}pt; }
+  @media print {
+    @page { margin: 0; size: ${wMm}mm auto; }
+    body { margin: 0; }
+    .page { gap: 1mm; padding: 1mm; }
+    .label { border: 0.3px solid #aaa; }
+  }
+</style>
+</head>
+<body>
+<div class="page">${labelsArr}</div>
+<script>
+window.onload = function() {
+  ${barcodeInits}
+  // Barcode render ho chuke — ab hi print dialog kholo (isi script se, taaki koi
+  // dusra onload isko overwrite na kare — pehle yeh bug tha jiski wajah se
+  // barcode kabhi dikhta tha kabhi nahi).
+  setTimeout(function() {
+    window.focus();
+    window.print();
+  }, 150);
+};
+// Print dialog band hote hi tab apne aap band ho jaaye — dukaan mein tabs jama nahi honge
+window.onafterprint = function() { window.close(); };
+</script>
+</body>
+</html>`;
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 540, maxHeight: "90vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h3 style={{ fontSize: 18, fontWeight: 800, color: "#111827" }}>🏷️ Label Print</h3>
+          <button onClick={onClose} style={{ background: "#f3f4f6", border: "none", borderRadius: 8, width: 32, height: 32, cursor: "pointer", color: "#6b7280" }}><Icon name="close" size={16} /></button>
+        </div>
+
+        {!preview ? (
+          <>
+            <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 12 }}>Product select karo jiska label print karna hai:</p>
+            <input
+              className="input"
+              placeholder="🔍 Product naam ya SKU se dhundo..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              autoFocus
+              style={{ marginBottom: 10 }}
+            />
+            <div style={{ maxHeight: 340, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 10 }}>
+              {filtered.length === 0 && (
+                <div style={{ padding: 24, textAlign: "center", color: "#9ca3af", fontSize: 13 }}>Koi product nahi mila</div>
+              )}
+              {filtered.map(p => (
+                <div key={p.id}
+                  onClick={() => selectProduct(p)}
+                  style={{ padding: "10px 14px", borderBottom: "1px solid #f3f4f6", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "#f9fafb"}
+                  onMouseLeave={e => e.currentTarget.style.background = "white"}
+                >
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: "#111827" }}>{p.name}</div>
+                    <div style={{ fontSize: 11, color: "#9ca3af" }}>SKU: {(p.sku || "").toUpperCase()} | {p.category}</div>
+                  </div>
+                  <div style={{ textAlign: "right", fontSize: 12 }}>
+                    <div style={{ fontWeight: 700, color: "#7c3aed" }}>₹{p.sellingPrice}</div>
+                    {p.mrp > 0 && <div style={{ color: "#9ca3af", textDecoration: "line-through", fontSize: 11 }}>₹{p.mrp}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Product selected — show label preview and options */}
+            <div style={{ background: "#f9fafb", borderRadius: 12, padding: 16, marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 14, color: "#111827" }}>{selectedProduct.name}</div>
+                <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>SKU: {(selectedProduct.sku || "").toUpperCase()}</div>
+              </div>
+              <button onClick={() => { setPreview(false); setSelectedProduct(null); }} style={{ fontSize: 11, color: "#7c3aed", background: "none", border: "1px solid #c4b5fd", borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>← Badlo</button>
+            </div>
+
+            {/* Size variant selector */}
+            {selectedProduct.pricingType === "size-variant" && selectedProduct.sizeVariants?.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <label className="label">Size Select Karo:</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                  {selectedProduct.sizeVariants.map((sv, i) => (
+                    <button key={i}
+                      onClick={() => { setSelectedVariant(sv); setLabelOverride(null); }}
+                      style={{ padding: "6px 14px", borderRadius: 8, border: `2px solid ${selectedVariant === sv ? "#7c3aed" : "#e5e7eb"}`, background: selectedVariant === sv ? "#f5f3ff" : "white", fontWeight: 700, fontSize: 13, cursor: "pointer", color: selectedVariant === sv ? "#7c3aed" : "#374151" }}>
+                      {sv.size}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Label Size — varies by printer/roll, so let the user pick it */}
+            <div style={{ marginBottom: 14 }}>
+              <label className="label">Label Size</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                {LABEL_SIZES.map(s => (
+                  <button key={s.id}
+                    onClick={() => setLabelSizeId(s.id)}
+                    style={{ padding: "6px 14px", borderRadius: 8, border: `2px solid ${labelSizeId === s.id ? "#7c3aed" : "#e5e7eb"}`, background: labelSizeId === s.id ? "#f5f3ff" : "white", fontWeight: 700, fontSize: 13, cursor: "pointer", color: labelSizeId === s.id ? "#7c3aed" : "#374151" }}>
+                    {s.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Label Preview */}
+            {(() => {
+              const info = getLabelInfo(selectedProduct, selectedVariant);
+              const scale = 3; // px per mm — purely for on-screen preview sizing
+              const boxW = labelSize.wMm * scale;
+              const boxH = labelSize.hMm * scale;
+              return (
+                <div style={{ marginBottom: 16 }}>
+                  <label className="label">Label Preview ({labelSize.title} — {labelSize.wMm}mm × {labelSize.hMm}mm):</label>
+                  <div style={{ border: "2px dashed #c4b5fd", borderRadius: 10, padding: 8, background: "#faf5ff", display: "flex", justifyContent: "center", marginTop: 8 }}>
+                    <div style={{ width: boxW, height: boxH, border: "0.5px solid #aaa", background: "white", padding: "6px 7px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", fontFamily: "Arial, sans-serif", position: "relative", overflow: "hidden" }}>
+                      <div style={{ fontSize: "7pt", fontWeight: "bold", color: "#333", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                        {localStorage.getItem('shopName') || 'FashionPro'}
+                      </div>
+                      <div style={{ fontSize: `${fontPt.name}pt`, fontWeight: fontBold.name ? "bold" : "normal", color: "#111", textAlign: "center", lineHeight: 1.2 }}>
+                        {info.name}{info.size ? ` — ${info.size}` : ""}
+                      </div>
+                      <div style={{ fontSize: `${fontPt.sku}pt`, fontWeight: fontBold.sku ? "bold" : "normal", color: "#888" }}>SKU: {info.sku}</div>
+                      {/* Real barcode — same JsBarcode library used for actual printing, white background, black bars only */}
+                      <div style={{ background: "#ffffff", width: "90%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <svg ref={previewBarcodeRef} style={{ maxWidth: "100%" }} />
+                        {!barcodeLibReady && <span style={{ fontSize: 10, color: "#9ca3af" }}>Barcode load ho raha hai...</span>}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        {info.discounted && <span style={{ fontSize: "7pt", color: "#888", textDecoration: "line-through" }}>MRP ₹{info.mrp}</span>}
+                        <span style={{ fontSize: `${fontPt.price}pt`, fontWeight: fontBold.price ? "bold" : "normal", color: "#000" }}>₹{info.rate}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Font Size — adjust live, preview above updates instantly */}
+            <div style={{ marginBottom: 16, border: "1px solid #e5e7eb", borderRadius: 10, padding: 12 }}>
+              <label className="label" style={{ margin: 0, marginBottom: 2, display: "block" }}>🔠 Font Size &amp; Bold (live preview)</label>
+              <p style={{ fontSize: 10.5, color: "#9ca3af", margin: "0 0 10px" }}>
+                Yeh settings sirf <b>{labelSize.title}</b> label ke liye save hongi — dusre size (jaise 3x2/2x1) pe alag se saved rahenge, aapas mein mix nahi honge.
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {[
+                  { key: "name", title: "Product Name" },
+                  { key: "sku", title: "SKU" },
+                  { key: "price", title: "Price" },
+                ].map(f => (
+                  <div key={f.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: "#374151" }}>{f.title}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <button onClick={() => bumpFont(f.key, -0.5)} style={{ width: 28, height: 28, borderRadius: 6, border: "1.5px solid #e5e7eb", background: "white", fontSize: 15, cursor: "pointer", fontWeight: 700 }}>−</button>
+                      <span style={{ width: 40, textAlign: "center", fontSize: 12.5, fontWeight: 700, color: "#111827" }}>{fontPt[f.key]}pt</span>
+                      <button onClick={() => bumpFont(f.key, 0.5)} style={{ width: 28, height: 28, borderRadius: 6, border: "1.5px solid #e5e7eb", background: "white", fontSize: 15, cursor: "pointer", fontWeight: 700 }}>+</button>
+                      <button
+                        onClick={() => toggleBold(f.key)}
+                        title="Bold on/off"
+                        style={{ width: 30, height: 28, borderRadius: 6, border: `1.5px solid ${fontBold[f.key] ? "#7c3aed" : "#e5e7eb"}`, background: fontBold[f.key] ? "#f5f3ff" : "white", color: fontBold[f.key] ? "#7c3aed" : "#9ca3af", fontSize: 13, fontWeight: 900, cursor: "pointer" }}>
+                        B
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Edit Label — override name/SKU/size/price for this print run only */}
+            {(() => {
+              const info = getLabelInfo(selectedProduct, selectedVariant);
+              return (
+                <div style={{ marginBottom: 16, border: "1px solid #e5e7eb", borderRadius: 10, padding: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: labelOverride ? 10 : 0 }}>
+                    <label className="label" style={{ margin: 0 }}>✏️ Label Edit Karo (optional)</label>
+                    {!labelOverride ? (
+                      <button
+                        onClick={() => setLabelOverride({ name: info.name, sku: info.sku, size: info.size, mrp: info.mrp || "", rate: info.rate || "" })}
+                        style={{ fontSize: 11, color: "#7c3aed", background: "none", border: "1px solid #c4b5fd", borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>
+                        Edit
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setLabelOverride(null)}
+                        style={{ fontSize: 11, color: "#6b7280", background: "none", border: "1px solid #e5e7eb", borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>
+                        Reset to default
+                      </button>
+                    )}
+                  </div>
+                  {labelOverride && (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 4 }}>
+                      <div style={{ gridColumn: "1 / -1" }}>
+                        <label className="label">Label Name</label>
+                        <input className="input" value={labelOverride.name} onChange={e => setLabelOverride(o => ({ ...o, name: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className="label">SKU</label>
+                        <input className="input" value={labelOverride.sku} onChange={e => setLabelOverride(o => ({ ...o, sku: e.target.value.toUpperCase() }))} />
+                      </div>
+                      <div>
+                        <label className="label">Size</label>
+                        <input className="input" value={labelOverride.size} onChange={e => setLabelOverride(o => ({ ...o, size: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className="label">MRP ₹</label>
+                        <input className="input" type="number" onWheel={e=>e.target.blur()} value={labelOverride.mrp} onChange={e => setLabelOverride(o => ({ ...o, mrp: e.target.value === "" ? "" : +e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className="label">Rate ₹</label>
+                        <input className="input" type="number" onWheel={e=>e.target.blur()} value={labelOverride.rate} onChange={e => setLabelOverride(o => ({ ...o, rate: e.target.value === "" ? "" : +e.target.value }))} />
+                      </div>
+                      <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#9ca3af" }}>
+                        Yeh sirf is print ke liye hai — inventory ka asli data change nahi hoga.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Quantity */}
+            <div style={{ marginBottom: 16 }}>
+              <label className="label">Kitne Labels Print Karne Hain?</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
+                <button onClick={() => setQty(q => Math.max(1, q - 1))} style={{ width: 36, height: 36, borderRadius: 8, border: "1.5px solid #e5e7eb", background: "white", fontSize: 18, cursor: "pointer", fontWeight: 700 }}>−</button>
+                <input
+                  type="number" min="1" max="100"
+                  value={qty}
+                  onChange={e => setQty(Math.max(1, Math.min(100, +e.target.value || 1)))}
+                  onWheel={e => e.target.blur()}
+                  style={{ width: 70, textAlign: "center", padding: "8px 4px", border: "1.5px solid #e5e7eb", borderRadius: 8, fontSize: 16, fontWeight: 700 }}
+                />
+                <button onClick={() => setQty(q => Math.min(100, q + 1))} style={{ width: 36, height: 36, borderRadius: 8, border: "1.5px solid #e5e7eb", background: "white", fontSize: 18, cursor: "pointer", fontWeight: 700 }}>+</button>
+                <span style={{ fontSize: 12, color: "#6b7280" }}>labels (max 100)</span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                {[1, 5, 10, 20, 50].map(n => (
+                  <button key={n} onClick={() => setQty(n)}
+                    style={{ padding: "4px 12px", borderRadius: 20, border: `1.5px solid ${qty === n ? "#7c3aed" : "#e5e7eb"}`, background: qty === n ? "#f5f3ff" : "white", fontSize: 12, fontWeight: 600, cursor: "pointer", color: qty === n ? "#7c3aed" : "#374151" }}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Printer info */}
+            <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: "#1e40af" }}>
+              <b>🖨️ Printer Setup:</b> Thermal printer use karo — USB/WiFi/Bluetooth kisi se bhi connect karo.<br/>
+              Print karte waqt Paper Size = <b>{labelSize.wMm}mm × {labelSize.hMm}mm ({labelSize.title})</b> set karo. Margin = 0. Scale = 100%.
+            </div>
+
+            <button
+              onClick={printLabels}
+              className="btn btn-primary"
+              style={{ width: "100%", justifyContent: "center", padding: "12px", fontSize: 15, fontWeight: 700 }}>
+              🖨️ {qty} Label{qty > 1 ? "s" : ""} Print Karo
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin, generateSKU, customSizes = [], inventoryNav, setInventoryNav, sales = [] }) => {
   const allSizes = [...SIZES, ...customSizes.filter(s => !SIZES.includes(s))];
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("All");
   const [stockFilter, setStockFilter] = useState("all"); // all | ok | low | out
+  const [showLabelPrinter, setShowLabelPrinter] = useState(false);
+  const [labelPrinterProduct, setLabelPrinterProduct] = useState(null); // preselected product — skips search
+  const [labelPrinterQty, setLabelPrinterQty] = useState(1);
+  const [postSaveLabelPrompt, setPostSaveLabelPrompt] = useState(null); // { product, suggestedQty } shown right after Add/Edit save
   const [sortBy, setSortBy] = useState("name"); // name | stock_asc | stock_desc | price_asc | price_desc | margin_desc
   const [showModal, setShowModal] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
@@ -2866,9 +3625,15 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
     if (editProduct) {
       setProducts(products.map(p => p.id === editProduct.id ? { ...productData, id: p.id } : p));
       showToast("Product update ho gaya!");
+      // If stock went up (e.g. 5 → 10), suggest printing labels for the newly added pieces
+      const qtyAdded = (productData.quantity || 0) - (editProduct.quantity || 0);
+      setPostSaveLabelPrompt({ product: { ...productData, id: editProduct.id }, suggestedQty: qtyAdded > 0 ? qtyAdded : 1 });
     } else {
-      setProducts([...products, { ...productData, id: Date.now() }]);
+      const newProduct = { ...productData, id: Date.now() };
+      setProducts([...products, newProduct]);
       showToast("Product add ho gaya!");
+      // Ask right away whether labels are needed — no need to search for this product again
+      setPostSaveLabelPrompt({ product: newProduct, suggestedQty: productData.quantity || 1 });
     }
     setShowModal(false);
   };
@@ -2882,13 +3647,79 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
   };
   const toggleSize = (s) => setForm(f => ({ ...f, sizes: f.sizes.includes(s) ? f.sizes.filter(x => x !== s) : [...f.sizes, s] }));
 
+  // ── EXCEL EXPORT — jo filter/search abhi lagaya hai, wahi products export honge.
+  // Purchase Price/Margin column sirf Admin export mein aayega — Guest export mein
+  // nahi (privacy rule yahan bhi lagu hai).
+  const exportInventoryToExcel = () => {
+    if (filtered.length === 0) { showToast("Export karne ke liye koi product nahi hai", "error"); return; }
+    const rows = filtered.map(p => {
+      const row = {
+        "SKU": (p.sku || "").toUpperCase(),
+        "Name": p.name,
+        "Category": p.category,
+        "Brand": p.brand || "",
+        "Colors": Array.isArray(p.colors) ? p.colors.join(", ") : (p.colors || ""),
+        "Sizes": (p.sizes || []).join(", "),
+        "Selling Price (₹)": p.sellingPrice || 0,
+        "MRP (₹)": p.mrp || 0,
+        "Stock Qty": p.quantity || 0,
+        "Stock Value (₹)": (p.sellingPrice || 0) * (p.quantity || 0),
+        "Supplier": p.supplier || "",
+      };
+      if (isAdmin) {
+        row["Purchase Price (₹)"] = p.purchasePrice || 0;
+        row["Margin %"] = p.sellingPrice > 0 ? Math.round(((p.sellingPrice - (p.purchasePrice||0)) / p.sellingPrice) * 100) : 0;
+      }
+      return row;
+    });
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws["!cols"] = [{ wch: 12 }, { wch: 22 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 9 }, { wch: 13 }, { wch: 16 }, { wch: 14 }, { wch: 9 }];
+    XLSX.utils.book_append_sheet(wb, ws, "Inventory");
+    const fname = `FashionPro_Inventory_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, fname);
+    showToast(`📊 Excel download ho gayi: ${fname}`);
+  };
+
   return (
     <div className="page">
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <h2 style={{ fontSize:20, fontWeight:800, color:"#111827" }}>📦 Inventory</h2>
-        <button className="btn btn-primary" onClick={openAdd}><Icon name="plus" size={16} /> Add Product</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-outline" onClick={exportInventoryToExcel} style={{ color: "#059669", borderColor: "#86efac" }}>📊 Excel Export</button>
+          <button className="btn btn-outline" onClick={() => { setLabelPrinterProduct(null); setLabelPrinterQty(1); setShowLabelPrinter(true); }} style={{ color: "#7c3aed", borderColor: "#c4b5fd" }}>🏷️ Print Label</button>
+          <button className="btn btn-primary" onClick={openAdd}><Icon name="plus" size={16} /> Add Product</button>
+        </div>
       </div>
+      {showLabelPrinter && (
+        <LabelPrinter
+          products={products}
+          initialProduct={labelPrinterProduct}
+          initialQty={labelPrinterQty}
+          onClose={() => { setShowLabelPrinter(false); setLabelPrinterProduct(null); }}
+        />
+      )}
+      {postSaveLabelPrompt && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setPostSaveLabelPrompt(null)}>
+          <div className="modal" style={{ maxWidth: 380 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 800, color: "#111827", marginBottom: 8 }}>🏷️ Label Print Karna Hai?</h3>
+            <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 18 }}>
+              <b>{postSaveLabelPrompt.product.name}</b> ke liye abhi label print karna chahte ho?
+              {postSaveLabelPrompt.suggestedQty > 1 && <> ({postSaveLabelPrompt.suggestedQty} pieces add hue hain)</>}
+            </p>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button className="btn btn-outline" onClick={() => setPostSaveLabelPrompt(null)}>Nahi, baad mein</button>
+              <button className="btn btn-primary" onClick={() => {
+                setLabelPrinterProduct(postSaveLabelPrompt.product);
+                setLabelPrinterQty(Math.max(1, Math.min(100, postSaveLabelPrompt.suggestedQty || 1)));
+                setShowLabelPrinter(true);
+                setPostSaveLabelPrompt(null);
+              }}>🖨️ Haan, Print Karo</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Advanced Filters */}
       <div className="card" style={{ marginBottom:14, padding:"12px 16px" }}>
@@ -3057,7 +3888,8 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
                     <td>
                       <div style={{ display: "flex", gap: 6 }}>
                         <button className="btn btn-outline btn-sm" onClick={() => openEdit(p)}><Icon name="edit" size={14} /></button>
-                        {p.priceHistory && p.priceHistory.length > 0 && (
+                        <button className="btn btn-outline btn-sm" title="Label Print karo" onClick={() => { setLabelPrinterProduct(p); setLabelPrinterQty(1); setShowLabelPrinter(true); }} style={{ color: "#7c3aed", borderColor: "#c4b5fd", fontSize: 12 }}>🏷️</button>
+                        {isAdmin && p.priceHistory && p.priceHistory.length > 0 && (
                           <button className="btn btn-outline btn-sm" title="Rate History dekhoo"
                             onClick={() => setPriceHistoryProduct(p)}
                             style={{ color: "#f59e0b", borderColor: "#fcd34d", fontSize: 12 }}>📈</button>
@@ -3272,7 +4104,11 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
                       <div key={i}>
                         <div style={{ display: "grid", gridTemplateColumns: "72px 1fr 90px 70px 1fr 72px 28px", gap: 5, marginBottom: 2, alignItems: "center" }}>
                           <input className="input" value={sv.size} onChange={e => updateVariant(i, "size", e.target.value)} placeholder="60" style={{ textAlign: "center", fontWeight: 700, padding: "6px 4px" }} />
-                          <input className="input" type="number" onWheel={e=>e.target.blur()} value={sv.purchasePrice} onChange={e => updateVariant(i, "purchasePrice", e.target.value)} placeholder="₹" style={{ padding: "6px 4px" }} />
+                          {isAdmin ? (
+                            <input className="input" type="number" onWheel={e=>e.target.blur()} value={sv.purchasePrice} onChange={e => updateVariant(i, "purchasePrice", e.target.value)} placeholder="₹" style={{ padding: "6px 4px" }} />
+                          ) : (
+                            <input className="input" type="text" value="🔒" disabled title="Sirf Admin dekh sakta hai" style={{ padding: "6px 4px", textAlign: "center", color: "#9ca3af", background: "#f9fafb", cursor: "not-allowed" }} />
+                          )}
                           <input className="input" type="number" onWheel={e=>e.target.blur()} value={sv.mrp} onChange={e => updateVariant(i, "mrp", e.target.value)} placeholder="336" style={{ padding: "6px 4px" }} />
                           <input className="input" type="number" onWheel={e=>e.target.blur()} value={sv.piecesPerBox || ""} onChange={e => updateVariant(i, "piecesPerBox", e.target.value)} placeholder="2" style={{ padding: "6px 4px", textAlign: "center" }} />
                           <input className="input" type="number" onWheel={e=>e.target.blur()} value={sv.sellingPrice} onChange={e => updateVariant(i, "sellingPrice", e.target.value)} placeholder="₹ *" style={{ padding: "6px 4px", border: !sv.sellingPrice ? "1.5px solid #fca5a5" : undefined }} />
@@ -3311,8 +4147,8 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
                       ))}
                     </div>
                   </div>
-                  <div className="form-row form-row-3">
-                    <div><label className="label">Purchase Price ₹</label><input className="input" type="number" onWheel={e=>e.target.blur()} value={form.purchasePrice} onChange={e => setForm({ ...form, purchasePrice: e.target.value })} placeholder="450" /></div>
+                  <div className={isAdmin ? "form-row form-row-3" : "form-row form-row-2"}>
+                    {isAdmin && <div><label className="label">Purchase Price ₹</label><input className="input" type="number" onWheel={e=>e.target.blur()} value={form.purchasePrice} onChange={e => setForm({ ...form, purchasePrice: e.target.value })} placeholder="450" /></div>}
                     <div><label className="label">Selling Price ₹ *</label><input className="input" type="number" onWheel={e=>e.target.blur()} value={form.sellingPrice} onChange={e => setForm({ ...form, sellingPrice: e.target.value })} placeholder="120" /></div>
                     <div><label className="label">Quantity *</label><input className="input" type="number" onWheel={e=>e.target.blur()} value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} placeholder="50" /></div>
                   </div>
@@ -3414,7 +4250,7 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
               <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
                 <span style={{ background:"#f0fdf4", border:"1px solid #86efac", borderRadius:8, padding:"4px 12px", fontSize:12, fontWeight:700, color:"#059669" }}>Current Stock: {p.quantity} pcs</span>
                 {p.sellingPrice && <span style={{ background:"#f5f3ff", border:"1px solid #c4b5fd", borderRadius:8, padding:"4px 12px", fontSize:12, fontWeight:700, color:"#7c3aed" }}>Selling: ₹{p.sellingPrice}</span>}
-                {p.purchasePrice && <span style={{ background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:8, padding:"4px 12px", fontSize:12, fontWeight:700, color:"#92400e" }}>Purchase: ₹{p.purchasePrice}</span>}
+                {isAdmin && p.purchasePrice && <span style={{ background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:8, padding:"4px 12px", fontSize:12, fontWeight:700, color:"#92400e" }}>Purchase: ₹{p.purchasePrice}</span>}
               </div>
               {withStock.length === 0 ? (
                 <p style={{ color:"#9ca3af", fontSize:13 }}>Koi stock history nahi mili. Purchase ya sale karo toh yahan dikhega.</p>
@@ -3425,6 +4261,8 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
                     {withStock.map((e, i) => {
                       const color = e.type === "purchase" ? "#059669" : e.type === "return" ? "#d97706" : "#dc2626";
                       const sign  = e.type === "sale" ? "−" : "+";
+                      // Purchase (cost) rate hamesha admin-only hai — sale/return rate customer-facing hai, staff dekh sakta hai
+                      const rateVisible = e.type !== "purchase" || isAdmin;
                       let ds = e.date || "";
                       try { if (ds.length >= 10) { const [y,m,d] = ds.slice(0,10).split("-"); const mo=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; ds=`${d} ${mo[+m-1]} ${y}`; } } catch {}
                       return (
@@ -3432,7 +4270,7 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
                           <td style={{ whiteSpace:"nowrap" }}>{ds}</td>
                           <td><span style={{ background:e.type==="purchase"?"#f0fdf4":e.type==="return"?"#fff7ed":"#fef2f2", color, padding:"2px 7px", borderRadius:6, fontWeight:700, fontSize:11 }}>{e.type==="purchase"?"📥 Purchase":e.type==="return"?"↩️ Return":"📤 Sale"}</span></td>
                           <td style={{ fontWeight:700, color }}>{sign}{e.qty}</td>
-                          <td style={{ color:"#6b7280" }}>{e.price ? `₹${e.price}` : "—"}</td>
+                          <td style={{ color:"#6b7280" }}>{!rateVisible ? "🔒" : (e.price ? `₹${e.price}` : "—")}</td>
                           <td style={{ fontWeight:700 }}>{e.stockAfter}</td>
                           <td style={{ color:"#6b7280", fontSize:11, maxWidth:160 }}>{e.note}</td>
                         </tr>
@@ -3483,6 +4321,7 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
   const [quickSize, setQuickSize] = useState("");
   const [quickColor, setQuickColor] = useState("");
   const searchRef = useRef(null);
+  const codeSearchRef = useRef(null); // SKU/barcode field — scanner types into this
   const [dropdownIdx, setDropdownIdx] = useState(-1); // keyboard nav
   const [codeDropdownIdx, setCodeDropdownIdx] = useState(-1);
 
@@ -3549,7 +4388,14 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
     if (!quickName || !quickPrice) { showToast("Product naam aur price dalo", "error"); return; }
     // BUG30 FIX: price 0 ya negative pe sale block karo
     if (+quickPrice <= 0) { showToast("Price ₹0 nahi ho sakta!", "error"); return; }
-    const matchedProduct = products.find(p => p.name.toLowerCase() === quickName.toLowerCase() && p.sellingPrice === +quickPrice);
+    // FIX: pehle sirf EXACT price match par hi product link hota tha — isliye jab bhi
+    // rate thoda bhi edit/bargain karte the (jo billing counter par aam baat hai),
+    // SKU, MRP, aur stock-deduction ka link TOOT jaata tha. Ab naam se match karte hain
+    // (selectedProduct ko priority — jo dropdown se pick kiya gaya hai), price chahe
+    // kuch bhi ho, product ka link bana rahega.
+    const matchedProduct = (selectedProduct && selectedProduct.name.toLowerCase() === quickName.toLowerCase())
+      ? selectedProduct
+      : products.find(p => p.name.toLowerCase() === quickName.toLowerCase());
     const newItem = {
       cartItemId: Date.now() + Math.random(), // unique ID — never merge items
       productId: matchedProduct ? matchedProduct.id : null,
@@ -3580,6 +4426,55 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
     setQuickName(""); setQuickPrice(""); setQuickQty(1); setQuickSize(""); setQuickColor(""); setSearch(""); setSelectedProduct(null); setSelectedVariant(null);
     showToast("Cart mein add ho gaya! ✓");
     searchRef.current?.focus();
+  };
+
+  // ── BARCODE SCANNER — ek scan mein product qty/price sab ke saath cart mein add ──
+  // USB/Bluetooth barcode scanner ek keyboard ki tarah hi kaam karta hai: SKU ke
+  // characters type karke automatically Enter bhejta hai. Isliye exact SKU match
+  // milte hi — bina kisi extra click/select ke — seedha cart mein daal dete hain.
+  const scanAndAddBarcode = (rawCode) => {
+    const code = (rawCode ?? codeSearch).trim();
+    if (!code) return;
+    const exact = products.find(p => (p.sku || "").toLowerCase() === code.toLowerCase());
+    if (!exact) {
+      showToast("Yeh barcode/SKU inventory mein nahi mila", "error");
+      setCodeSearch(""); setShowCodeDrop(false); setCodeDropdownIdx(-1);
+      return;
+    }
+    const isSV = exact.pricingType === "size-variant" && exact.sizeVariants?.length > 0;
+    const variant = isSV ? exact.sizeVariants[0] : null;
+    const newItem = {
+      cartItemId: Date.now() + Math.random(),
+      productId: exact.id,
+      name: exact.name,
+      sku: (exact.sku || "").toUpperCase(),
+      size: isSV ? (variant.size || "-") : ((exact.sizes || [])[0] || "-"),
+      color: (exact.colors || [])[0] || "-",
+      qty: 1,
+      price: isSV ? (variant.sellingPrice || 0) : (exact.sellingPrice || 0),
+      mrpPerPiece: isSV
+        ? (variant.mrpPerPiece || (variant.mrp > 0 ? Math.round(variant.mrp / (variant.piecesPerBox || 1)) : 0))
+        : (exact.mrp > 0 && exact.piecesPerPack > 0 ? Math.round(exact.mrp / exact.piecesPerPack) : 0),
+      mrp: isSV ? (variant.mrp || 0) : (exact.mrp || 0),
+      piecesPerBox: isSV ? (variant.piecesPerBox || 1) : (exact.piecesPerPack || 1),
+    };
+    const existing = cart.find(it =>
+      it.name.toLowerCase() === newItem.name.toLowerCase() &&
+      it.size === newItem.size &&
+      it.color === newItem.color &&
+      it.price === newItem.price
+    );
+    if (existing) {
+      // Same product dubara scan hua — qty +1 karo (jaise malls mein hota hai)
+      setCart(prev => prev.map(it => it.cartItemId === existing.cartItemId ? { ...it, qty: it.qty + 1 } : it));
+      showToast(`${exact.name} × ${existing.qty + 1} ✓ (scan)`);
+    } else {
+      setCart(prev => [...prev, newItem]);
+      showToast(`${exact.name} scan ho gaya ✓`);
+    }
+    setCodeSearch(""); setShowCodeDrop(false); setCodeDropdownIdx(-1);
+    // Field ko turant refocus karo taaki agla scan bina mouse touch kiye ho jaye
+    setTimeout(() => codeSearchRef.current?.focus(), 30);
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -3800,6 +4695,45 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
     setTimeout(() => searchRef.current?.focus(), 50);
   };
 
+  // ── KEYBOARD SHORTCUTS — mouse ke bina fast billing ke liye ──
+  // Sirf F-keys use kiye hain (F2/F4/F8/F9) kyunki yeh Chrome, Edge, Firefox aur
+  // Electron sab mein same tarah kaam karte hain, browser ka koi built-in shortcut
+  // inse clash nahi karta (F1/F3/F5/F6/F11/F12 jaan-bujh kar avoid kiye hain, kyunki
+  // wo browser khud use karta hai — help/find/refresh/address-bar/fullscreen/devtools).
+  //   F2 → Barcode/SKU scan field pe seedha cursor
+  //   F4 → Naam se search field pe seedha cursor
+  //   F8 → Bill Complete / Checkout (jaise cart bhara ho)
+  //   F9 → Poora cart clear karke naya bill shuru karo
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      // Koi modal khula ho toh shortcuts skip karo — accidental checkout/clear na ho
+      if (dupConfirm || showSettleModal || showInvoice) return;
+      switch (e.key) {
+        case "F2":
+          e.preventDefault();
+          codeSearchRef.current?.focus();
+          break;
+        case "F4":
+          e.preventDefault();
+          searchRef.current?.focus();
+          break;
+        case "F8":
+          e.preventDefault();
+          if (cart.length > 0) completeSale();
+          break;
+        case "F9":
+          e.preventDefault();
+          if (cart.length > 0) { setCart([]); showToast("Naya bill — cart clear ✓"); }
+          break;
+        default:
+          break;
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart, dupConfirm, showSettleModal, showInvoice]);
+
   return (
     <div className="page" style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 20, alignItems: "start" }}>
       {/* Duplicate item confirm modal — replaces window.confirm to prevent app freeze */}
@@ -3833,9 +4767,14 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
       <div>
         {/* Fast Entry Row */}
         <div className="card" style={{ marginBottom: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
             <h3 style={{ fontSize: 15, fontWeight: 700 }}>⚡ Fast Billing</h3>
-            <span style={{ fontSize: 11, color: "#9ca3af", background: "#f3f4f6", padding: "3px 10px", borderRadius: 20 }}>Inventory product ya naya — dono chalega</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 10.5, color: "#6b7280", background: "#f3f4f6", padding: "3px 8px", borderRadius: 20 }}><kbd style={{ fontWeight: 800 }}>F2</kbd> Scan</span>
+              <span style={{ fontSize: 10.5, color: "#6b7280", background: "#f3f4f6", padding: "3px 8px", borderRadius: 20 }}><kbd style={{ fontWeight: 800 }}>F4</kbd> Naam Search</span>
+              <span style={{ fontSize: 10.5, color: "#6b7280", background: "#f3f4f6", padding: "3px 8px", borderRadius: 20 }}><kbd style={{ fontWeight: 800 }}>F8</kbd> Bill Complete</span>
+              <span style={{ fontSize: 10.5, color: "#6b7280", background: "#f3f4f6", padding: "3px 8px", borderRadius: 20 }}><kbd style={{ fontWeight: 800 }}>F9</kbd> Naya Bill</span>
+            </div>
           </div>
 
           {/* Search bar — 2 separate fields: Naam search + Code search */}
@@ -3890,26 +4829,38 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
             </div>
             {/* Code/SKU se search */}
             <div style={{ position: "relative" }}>
-              <label className="label" style={{ fontSize:11, marginBottom:3 }}>🏷️ Code (SKU) se Dhundo</label>
+              <label className="label" style={{ fontSize:11, marginBottom:3 }}>📷 Scan / Code (SKU) se Dhundo <kbd style={{ fontSize:9, background:"#f3f4f6", border:"1px solid #e5e7eb", borderRadius:4, padding:"1px 5px", marginLeft:4, fontWeight:700, color:"#6b7280" }}>F2</kbd></label>
               <div style={{ position: "relative" }}>
                 <svg style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#9ca3af" }} width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h.01M15 9h.01M9 15h.01M15 15h.01"/></svg>
                 <input
+                  ref={codeSearchRef}
                   className="input"
                   style={{ paddingLeft: 32, fontSize:13 }}
-                  placeholder="SKU code... (↑↓ navigate)"
+                  placeholder="Barcode scan karo ya SKU type karo..."
                   value={codeSearch}
                   onChange={e => { setCodeSearch(e.target.value); setShowCodeDrop(true); setSearch(""); setCodeDropdownIdx(-1); }}
                   onFocus={() => setShowCodeDrop(true)}
                   onBlur={() => setTimeout(() => { setShowCodeDrop(false); setCodeDropdownIdx(-1); }, 180)}
                   onKeyDown={e => {
                     const cr = skuFilteredProducts;
-                    if (!showCodeDrop || cr.length === 0) { if (e.key === "Enter") addToCart(); return; }
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      const code = codeSearch.trim().toLowerCase();
+                      const exact = products.find(p => (p.sku || "").toLowerCase() === code);
+                      // Scanner ya exact SKU type kiya — ek hi Enter mein cart mein add, koi extra step nahi
+                      if (exact) { scanAndAddBarcode(code); return; }
+                      if (codeDropdownIdx >= 0 && codeDropdownIdx < cr.length) {
+                        selectProduct(cr[codeDropdownIdx]); setCodeSearch(""); setCodeDropdownIdx(-1); setShowCodeDrop(false);
+                      }
+                      return;
+                    }
+                    if (!showCodeDrop || cr.length === 0) return;
                     if (e.key === "ArrowDown") { e.preventDefault(); setCodeDropdownIdx(i => Math.min(i + 1, cr.length - 1)); }
                     else if (e.key === "ArrowUp") { e.preventDefault(); setCodeDropdownIdx(i => Math.max(i - 1, 0)); }
-                    else if (e.key === "Enter" || e.key === "Tab") {
+                    else if (e.key === "Tab") {
                       if (codeDropdownIdx >= 0 && codeDropdownIdx < cr.length) {
-                        e.preventDefault(); selectProduct(cr[codeDropdownIdx]); setCodeSearch(""); setCodeDropdownIdx(-1); setShowCodeDrop(false);
-                      } else if (e.key === "Enter") { addToCart(); }
+                        selectProduct(cr[codeDropdownIdx]); setCodeSearch(""); setCodeDropdownIdx(-1); setShowCodeDrop(false);
+                      }
                     } else if (e.key === "Escape") { setShowCodeDrop(false); setCodeDropdownIdx(-1); }
                   }}
                 />
@@ -3972,7 +4923,7 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
               <Icon name="plus" size={16} /> Add
             </button>
           </div>
-          <p style={{ fontSize: 11.5, color: "#9ca3af", marginTop: 8 }}>💡 Tip: Size aur Color optional hai — direct naam aur price daalo, Enter dabao, ho gaya!</p>
+          <p style={{ fontSize: 11.5, color: "#9ca3af", marginTop: 8 }}>💡 Tip: Size aur Color optional hai — direct naam aur price daalo, Enter dabao, ho gaya! Ya <b>F2</b> dabao aur barcode scanner se seedha scan karo — product apne aap sab values ke saath cart mein aa jayega.</p>
         </div>
 
         {/* Cart Table */}
@@ -4485,6 +5436,7 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: mySettle>0?6:0 }}>
                         <div style={{ flex:1, minWidth:0 }}>
                           <div style={{ fontWeight:700, fontSize:13 }}>{item.name}
+                            {item.sku && <span style={{ fontSize:9.5, color:"#7c3aed", fontWeight:700, marginLeft:5 }}>[{item.sku.toUpperCase()}]</span>}
                             {item.size!=="-" && <span style={{ fontSize:10, color:"#9ca3af", marginLeft:5 }}>{item.size}</span>}
                             {item.qty>1 && <span style={{ fontSize:10, color:"#9ca3af", marginLeft:4 }}>×{item.qty}</span>}
                           </div>
@@ -4831,8 +5783,10 @@ const Purchases = ({ purchases, setPurchases, products, setProducts, showToast }
     resetForm();
   };
 
-  const totalSpent = purchases.reduce((a, b) => a + b.total, 0);
-  const totalQty = purchases.reduce((a, b) => a + b.quantity, 0);
+  // Guard against old/corrupt records that may not have a `total` or `quantity` field
+  const purchaseTotal = (p) => (p && typeof p.total === "number") ? p.total : ((p?.quantity || 0) * (p?.purchasePrice || 0));
+  const totalSpent = purchases.reduce((a, b) => a + purchaseTotal(b), 0);
+  const totalQty = purchases.reduce((a, b) => a + (b.quantity || 0), 0);
 
   return (
     <div className="page">
@@ -4885,7 +5839,7 @@ const Purchases = ({ purchases, setPurchases, products, setProducts, showToast }
                   <td><span className="badge badge-blue">{p.quantity} pcs</span></td>
                   <td style={{ fontWeight: 600, color: "#dc2626" }}>₹{p.purchasePrice}</td>
                   <td style={{ fontWeight: 600, color: "#059669" }}>{p.sellingPrice ? `₹${p.sellingPrice}` : <span style={{ color: "#d1d5db" }}>—</span>}</td>
-                  <td style={{ fontWeight: 800, color: "#1f2937" }}>₹{p.total.toLocaleString()}</td>
+                  <td style={{ fontWeight: 800, color: "#1f2937" }}>₹{purchaseTotal(p).toLocaleString()}</td>
                 </tr>
               ))}
               {purchases.length === 0 && (
@@ -5467,6 +6421,7 @@ const Customers = ({ customers, setCustomers, sales, showToast, isAdmin, highlig
                       {item.name}
                       {item.size && item.size !== "-" && <span style={{ fontSize:11, color:"#9ca3af", fontWeight:400, marginLeft:5 }}>({item.size}{item.color&&item.color!=="-"?`/${item.color}`:""})</span>}
                     </div>
+                    {item.sku && <div style={{ fontSize:10.5, color:"#7c3aed", fontWeight:700, marginBottom:3 }}>SKU: {item.sku.toUpperCase()}</div>}
                     {/* MRP row */}
                     <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#9ca3af", marginBottom:2 }}>
                       <span>MRP: ₹{mrpPc > 0 ? mrpPc : ratePc}/pc × {qty}</span>
@@ -6231,7 +7186,7 @@ const MarginAnalysis = ({ sales, products, setGlobalInvoiceSale }) => {
                 {itemRows.map(({ item, qty, effTotal, cost, margin, marginPct, purchasePrice }, ii) => (
                   <div key={ii} style={{ display: "grid", gridTemplateColumns: "1fr 60px 80px 80px 80px 80px", gap: 8, padding: "8px 0", borderBottom: "1px solid #f9fafb", fontSize: 13, alignItems: "center" }}>
                     <div>
-                      <div style={{ fontWeight: 600 }}>{item.name}</div>
+                      <div style={{ fontWeight: 600 }}>{item.name}{item.sku && <span style={{ fontSize: 10, color: "#7c3aed", fontWeight: 700, marginLeft: 5 }}>[{item.sku.toUpperCase()}]</span>}</div>
                       <div style={{ fontSize: 10, color: "#9ca3af" }}>
                         {[item.size && item.size !== "-" ? `Size ${item.size}` : "", item.color && item.color !== "-" ? item.color : ""].filter(Boolean).join(" / ")}
                         {purchasePrice === 0 && <span style={{ color: "#ef4444", marginLeft: 6 }}>⚠️ No cost</span>}
@@ -7404,17 +8359,18 @@ const WhatsAppBroadcast = ({ customers, sales, shopName, showToast }) => {
 // ============================================================
 // SETTINGS (with Backup/Restore)
 // ============================================================
-const Settings = ({ shopName, setShopName, showToast, sales, products, purchases, customers, billCounter, setSales, setProducts, setPurchases, setCustomers, setBillCounter, customSizes, setCustomSizes }) => {
-  const [name, setName] = useState(shopName);
-  const [address, setAddress] = useState(() => {
-    try { return localStorage.getItem('shopAddress') || "Shop No:1, Bhagwant Complex, Pande Chowk, Barshi"; } catch { return "Shop No:1, Bhagwant Complex, Pande Chowk, Barshi"; }
-  });
-  const [phone, setPhone] = useState(() => {
+const Settings = ({ shopName, setShopName, shopSettings, setShopSettings, showToast, sales, products, purchases, customers, billCounter, setSales, setProducts, setPurchases, setCustomers, setBillCounter, customSizes, setCustomSizes }) => {
+  const [name, setName] = useState(shopSettings?.name || shopName);
+  const [address, setAddress] = useState(shopSettings?.address || (() => {
+    try { return localStorage.getItem('shopAddress') || ""; } catch { return ""; }
+  })());
+  const [phone, setPhone] = useState(shopSettings?.phone || (() => {
     try { return localStorage.getItem('shopPhone') || ""; } catch { return ""; }
-  });
-  const [gst, setGst] = useState(() => {
+  })());
+  const [gst, setGst] = useState(shopSettings?.gst || (() => {
     try { return localStorage.getItem('shopGst') || ""; } catch { return ""; }
-  });
+  })());
+  const [saving, setSaving] = useState(false);
   const [lowStockThreshold, setLowStockThreshold] = useState(5);
   const [restoreStatus, setRestoreStatus] = useState(null);
   const [newSizeInput, setNewSizeInput] = useState("");
@@ -7504,16 +8460,16 @@ const Settings = ({ shopName, setShopName, showToast, sales, products, purchases
             <div><label className="label">Address</label><textarea className="input" value={address} onChange={e => setAddress(e.target.value)} rows={3} style={{ resize: "vertical" }} /></div>
             <div><label className="label">Phone</label><input className="input" value={phone} onChange={e => setPhone(e.target.value)} /></div>
             <div><label className="label">GST Number</label><input className="input" value={gst} onChange={e => setGst(e.target.value)} /></div>
-            <button className="btn btn-primary" style={{ marginTop: 4 }} onClick={() => {
+            <button className="btn btn-primary" style={{ marginTop: 4 }} disabled={saving} onClick={async () => {
+                setSaving(true);
+                const newSettings = { name, address, phone, gst };
                 setShopName(name);
-                try {
-                  localStorage.setItem('shopAddress', address);
-                  localStorage.setItem('shopPhone', phone);
-                  localStorage.setItem('shopGst', gst);
-                  localStorage.setItem('shopName', name);
-                } catch(e) {}
-                showToast("✅ Settings save ho gaya!");
-              }}>💾 Save Changes</button>
+                if (setShopSettings) setShopSettings(newSettings);
+                await saveShopSettings(newSettings);
+                setSaving(false);
+                showToast("✅ Settings save ho gaya! Sab devices pe sync hoga 🔄");
+              }}>{saving ? "⏳ Saving..." : "💾 Save & Sync"}</button>
+            <p style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>☁️ Firebase pe save hoga — sab devices pe automatically sync hoga</p>
           </div>
         </div>
         <div className="card">
