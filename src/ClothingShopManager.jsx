@@ -247,7 +247,7 @@ const LoginScreen = ({ onLogin }) => {
           </div>
         )}
 
-        <p style={{ color: "rgba(255,255,255,0.3)", fontSize: 11, textAlign: "center", marginTop: 24, marginBottom: 0 }}>FashionPro &copy; 2025</p>
+        <p style={{ color: "rgba(255,255,255,0.3)", fontSize: 11, textAlign: "center", marginTop: 24, marginBottom: 0 }}>FashionPro by Yash</p>
       </div>
     </div>
   );
