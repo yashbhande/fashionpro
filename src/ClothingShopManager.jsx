@@ -70,6 +70,24 @@ const getISTDaysAgo = (days) => {
   return past.toISOString().split("T")[0]; // YYYY-MM-DD in IST
 };
 
+// BUG51 FIX: Sale ka date field UTC ISO string mein store hota hai (new Date().toISOString()),
+// lekin Dashboard/Reports/Margin sirf raw string ko .slice(0,10) kar ke IST "today" se compare
+// karte the — bina UTC→IST convert kiye. Result: raat ~12am–5:30am IST ke sales "kal" ke UTC
+// date mein slice ho jaate the, aur Dashboard ke "Aaj" period mein miss ho jaate the (jabki
+// Bill History sahi tha kyunki wahan pehle se IST conversion tha). Yeh helper sab jagah use
+// karo raw .slice(0,10) ki jagah, taaki Dashboard/Reports/Margin bhi Bill History jaisa sahi ho.
+const toISTDateSlice = (rawDate) => {
+  if (!rawDate) return "";
+  if (rawDate.length > 10) {
+    const d = new Date(rawDate);
+    if (!isNaN(d)) {
+      const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
+      return ist.toISOString().split("T")[0];
+    }
+  }
+  return rawDate.slice(0, 10);
+};
+
 // ── Search relevance sort — startsWith > includes, then alpha ──
 // Usage: arr.filter(...).sort((a,b) => searchSort(a.name, b.name, query))
 const searchSort = (aStr, bStr, q) => {
@@ -258,6 +276,10 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
   const [replaceItemDisc, setReplaceItemDisc] = useState("");
   const [replQuery, setReplQuery] = useState("");
   const [replDropOpen, setReplDropOpen] = useState(false);
+  // BUG52 FIX: jab replace list se koi product select karo, uska id yahan store hota hai —
+  // pehle yeh kahin store hi nahi hota tha, isliye replace ke baad bhi purane product ka
+  // hi productId reh jaata tha (cost/margin galat product se calculate hota tha)
+  const [replaceNewProductId, setReplaceNewProductId] = useState(null);
 
   // Edit customer state
   const [showEditCust, setShowEditCust] = useState(false);
@@ -272,7 +294,7 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
     setMode(null); setReplaceIdx(null);
     setReplaceNewName(""); setReplaceNewPrice(""); setReplaceNewQty(1);
     setReplaceNewSize(""); setReplaceNewColor(""); setReplaceItemDisc("");
-    setReplQuery(""); setReplDropOpen(false);
+    setReplQuery(""); setReplDropOpen(false); setReplaceNewProductId(null);
     setReturnSelected({});
   };
 
@@ -358,8 +380,12 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
     const newEff = Math.max(0, newPrice * newQty - newItemDiscRs);
     const diff = oldActualPaid - newEff;
 
+    // BUG52 FIX: naye product ka id set karo (agar list se select kiya), warna quick-add
+    // item maan kar productId hata do — purane product ka id yahan carry-forward nahi hona
+    // chahiye, warna margin/cost calculation galat product se hoti thi.
     const newItems = cvItems.map((it, i) => i === replaceIdx ? {
       ...it,
+      productId: replaceNewProductId || undefined,
       name: replaceNewName, price: newPrice, qty: newQty,
       size: replaceNewSize || it.size, color: replaceNewColor || it.color,
       itemDiscountRs: newItemDiscRs, itemDiscount: newItemDiscRs, itemDiscountType: "₹",
@@ -394,6 +420,37 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
     };
     const updatedSale = pushVersion(curSale, newVersion);
     updateSale(updatedSale);
+
+    // BUG52 FIX: Replace pe inventory kabhi update hi nahi hoti thi — purane item ka stock
+    // deduct raha jaata tha (jabki wo customer ke paas ab nahi hai) aur naye item ka stock
+    // kabhi minus hi nahi hota tha. Return ("Stock wapas karo") jaisa hi yahan bhi karna hai:
+    // purana item wapas add karo, naya item minus karo.
+    if (setProducts) {
+      // Purana item — stock wapas add karo
+      if (oldItem.productId) {
+        setProducts(prev => prev.map(p => {
+          if (p.id !== oldItem.productId) return p;
+          if (p.pricingType === "size-variant" && oldItem.size && oldItem.size !== "-" && p.sizeVariants?.length) {
+            const newVariants = p.sizeVariants.map(sv => sv.size === oldItem.size ? { ...sv, stock: (sv.stock || 0) + oldItem.qty } : sv);
+            return { ...p, quantity: p.quantity + oldItem.qty, sizeVariants: newVariants };
+          }
+          return { ...p, quantity: p.quantity + oldItem.qty };
+        }));
+      }
+      // Naya item — stock minus karo
+      if (replaceNewProductId) {
+        setProducts(prev => prev.map(p => {
+          if (p.id !== replaceNewProductId) return p;
+          const remainingQty = Math.max(0, p.quantity - newQty);
+          if (p.pricingType === "size-variant" && replaceNewSize && replaceNewSize !== "-" && p.sizeVariants?.length) {
+            const newVariants = p.sizeVariants.map(sv => sv.size === replaceNewSize ? { ...sv, stock: Math.max(0, (sv.stock || 0) - newQty) } : sv);
+            return { ...p, quantity: remainingQty, sizeVariants: newVariants };
+          }
+          return { ...p, quantity: remainingQty };
+        }));
+      }
+    }
+
     resetModes();
     alert(`✅ Replace ho gaya!\n${diff > 0 ? `Customer ko WAPIS KARO: ₹${diff}` : diff < 0 ? `Customer se LENA HAI: ₹${Math.abs(diff)}` : "Barabar exchange!"}\n\n${oldItem.name} → ${replaceNewName}`);
   };
@@ -748,7 +805,7 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
               const replResults = replQuery.length >= 1
                 ? products.filter(p => p.name.toLowerCase().includes(replQuery.toLowerCase()) || (p.sku||"").toLowerCase().includes(replQuery.toLowerCase())).sort((a,b) => searchSort(a.name, b.name, replQuery)).slice(0, 6)
                 : [];
-              const pickRepl = (p) => { setReplaceNewName(p.name); setReplaceNewPrice(p.sellingPrice || ""); setReplQuery(p.name); setReplDropOpen(false); };
+              const pickRepl = (p) => { setReplaceNewName(p.name); setReplaceNewPrice(p.sellingPrice || ""); setReplQuery(p.name); setReplDropOpen(false); setReplaceNewProductId(p.id); }; // BUG52 FIX: capture new product id
               return (
                 <>
                   <p style={{ fontSize:13.5, fontWeight:800, color:"#92400e", marginBottom:8 }}>🔄 Replace: <b>{oldItem.name}</b></p>
@@ -765,7 +822,7 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
                   <div style={{ position:"relative", marginBottom:6 }}>
                     <label className="label">New Item *</label>
                     <input className="input" value={replQuery}
-                      onChange={e=>{ setReplQuery(e.target.value); setReplaceNewName(e.target.value); setReplDropOpen(true); }}
+                      onChange={e=>{ setReplQuery(e.target.value); setReplaceNewName(e.target.value); setReplDropOpen(true); setReplaceNewProductId(null); }}
                       onFocus={()=>setReplDropOpen(true)}
                       onBlur={()=>setTimeout(()=>setReplDropOpen(false),200)}
                       placeholder="Naam ya SKU likhoo..." />
@@ -1296,7 +1353,7 @@ export default function App() {
     return p.quantity <= LOW_STOCK_THRESHOLD;
   });
   const getCV = (s) => { if (!s) return {}; return (s.versions && s.versions.length > 0) ? (s.versions[s.currentVersion ?? s.versions.length - 1] || s.versions[0] || s) : s; };
-  const todaySales = sales.filter(s => ((getCV(s).date || s.date) || "").slice(0, 10) === getISTDateStr()) // BUG25 FIX: IST
+  const todaySales = sales.filter(s => toISTDateSlice(getCV(s).date || s.date) === getISTDateStr()) // BUG51 FIX: IST conversion
     .sort((a,b) => (getCV(b).date||b.date||"").localeCompare(getCV(a).date||a.date||"")||b.id-a.id);
   const todayRevenue = todaySales.reduce((a, b) => a + getCV(b).total, 0);
   const totalRevenue = sales.reduce((a, b) => a + getCV(b).total, 0);
@@ -2178,9 +2235,9 @@ const Dashboard = ({ products, sales, totalRevenue, totalProfit, todayRevenue, t
   // Period-filtered sales
   const periodSales = (() => {
     const todayStr = getISTDateStr(); // BUG25 FIX: IST
-    if (dashPeriod === "today") return sales.filter(s => ((getCV2(s).date||s.date)||'').slice(0,10) === todayStr);
-    if (dashPeriod === "week")  { const d = getISTDaysAgo(7); return sales.filter(s => ((getCV2(s).date||s.date)||"").slice(0,10) >= d); } // BUG26 FIX: IST
-    if (dashPeriod === "month") { const d = getISTDaysAgo(30); return sales.filter(s => ((getCV2(s).date||s.date)||"").slice(0,10) >= d); } // BUG26 FIX: IST
+    if (dashPeriod === "today") return sales.filter(s => toISTDateSlice(getCV2(s).date||s.date) === todayStr); // BUG51 FIX: IST conversion
+    if (dashPeriod === "week")  { const d = getISTDaysAgo(7); return sales.filter(s => toISTDateSlice(getCV2(s).date||s.date) >= d); } // BUG51 FIX: IST conversion
+    if (dashPeriod === "month") { const d = getISTDaysAgo(30); return sales.filter(s => toISTDateSlice(getCV2(s).date||s.date) >= d); } // BUG51 FIX: IST conversion
     return sales;
   })();
   const periodRevenue = periodSales.filter(Boolean).reduce((a, s) => a + (getCV2(s).total||0), 0);
@@ -6540,9 +6597,9 @@ const Reports = ({ sales, products, purchases, customers, setGlobalInvoiceSale }
     const todayStr = getISTDateStr();
     let result = [...sales];
     // Date filter — always compare YYYY-MM-DD slice for reliability
-    if (period === "today") result = result.filter(s => ((rcv(s).date||s.date)||"").slice(0,10) === todayStr);
-    else if (period === "week") { const d = getISTDaysAgo(7); result = result.filter(s => ((rcv(s).date||s.date)||"").slice(0,10) >= d); }
-    else if (period === "month") { const d = getISTDaysAgo(30); result = result.filter(s => ((rcv(s).date||s.date)||"").slice(0,10) >= d); }
+    if (period === "today") result = result.filter(s => toISTDateSlice(rcv(s).date||s.date) === todayStr); // BUG51 FIX: IST conversion
+    else if (period === "week") { const d = getISTDaysAgo(7); result = result.filter(s => toISTDateSlice(rcv(s).date||s.date) >= d); } // BUG51 FIX: IST conversion
+    else if (period === "month") { const d = getISTDaysAgo(30); result = result.filter(s => toISTDateSlice(rcv(s).date||s.date) >= d); } // BUG51 FIX: IST conversion
     else if (period === "custom" && customFrom) {
       result = result.filter(s => {
         const d = rcv(s).date||s.date;
@@ -6942,7 +6999,7 @@ const MarginAnalysis = ({ sales, products, setGlobalInvoiceSale }) => {
   const todayStr = getISTDateStr(); // BUG25 FIX: IST
   const filteredSales = sales.filter(s => {
     const d = (s.versions && s.versions.length > 0 ? (s.versions[0].date || s.date) : s.date) || "";
-    const dSlice = d.slice(0, 10);
+    const dSlice = toISTDateSlice(d); // BUG51 FIX: IST conversion
     if (period === "today" && dSlice !== todayStr) return false;
     if (period === "week") { const weekAgo = getISTDaysAgo(7); if (dSlice < weekAgo) return false; }
     if (period === "month") { const monthAgo = getISTDaysAgo(30); if (dSlice < monthAgo) return false; }
