@@ -213,7 +213,7 @@ const LoginScreen = ({ onLogin }) => {
             <button className="login-btn" onClick={handleGuestLogin}>👤 Guest Login (Billing ke liye)</button>
             <button className="login-btn-outline" onClick={() => { setShowAdminPass(true); setErr(""); }}>👑 Admin Login</button>
             <p style={{ color: "rgba(255,255,255,0.35)", fontSize: 11, textAlign: "center", margin: "4px 0 0" }}>
-              Guest ko billing/inventory dikhega, par purchase price, margin, profit jaisi private details nahi dikhengi.
+              {/* Guest ko billing/inventory dikhega, par purchase price, margin, profit jaisi private details nahi dikhengi. */}
             </p>
           </div>
         ) : (
