@@ -76,28 +76,37 @@ const getISTDaysAgo = (days) => {
 // date mein slice ho jaate the, aur Dashboard ke "Aaj" period mein miss ho jaate the (jabki
 // Bill History sahi tha kyunki wahan pehle se IST conversion tha). Yeh helper sab jagah use
 // karo raw .slice(0,10) ki jagah, taaki Dashboard/Reports/Margin bhi Bill History jaisa sahi ho.
+// Safe parser — string mein agar timezone info (Z ya +/-offset) already hai
+// toh waisa hi parse karo (mobile "+05:30" ke saath store karta hai, PC khud
+// "Z" UTC ke saath) — extra +5:30 manually add karne ki zaroorat nahi, isse
+// double-shift ho jaata tha. Purane naive-format records (bina offset) ko hi
+// IST wall-clock maan kar +05:30 lagao.
+const parseISTAware = (rawDate) => {
+  let str = String(rawDate);
+  if (!/Z$|[+-]\d{2}:?\d{2}$/.test(str)) str += "+05:30";
+  return new Date(str);
+};
+
 const toISTDateSlice = (rawDate) => {
   if (!rawDate) return "";
   if (rawDate.length > 10) {
-    const d = new Date(rawDate);
+    const d = parseISTAware(rawDate);
     if (!isNaN(d)) {
-      const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
-      return ist.toISOString().split("T")[0];
+      // "Asia/Kolkata" mein date nikaalo — sv-SE locale se YYYY-MM-DD format milta hai
+      return d.toLocaleDateString("sv-SE", { timeZone: "Asia/Kolkata" });
     }
   }
   return rawDate.slice(0, 10);
 };
 
 // BUG: Invoice display mein date/time gलत timezone show ho rahe the (different devices par different dates dikha rahe the)
-// FIX: UTC ISO string ko IST mein convert karke display karo — yeh sab devices par consistent hoga
+// FIX: date string ko sahi se parse karke explicitly Asia/Kolkata mein display karo — yeh sab devices/PC clock settings par consistent hoga
 const formatISTDate = (rawDate) => {
   if (!rawDate) return "";
   try {
-    const d = new Date(rawDate);
+    const d = parseISTAware(rawDate);
     if (isNaN(d)) return rawDate;
-    // UTC ko IST mein convert karo
-    const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
-    return ist.toLocaleDateString("en-IN", {weekday:"long", day:"numeric", month:"long", year:"numeric"});
+    return d.toLocaleDateString("en-IN", {weekday:"long", day:"numeric", month:"long", year:"numeric", timeZone: "Asia/Kolkata"});
   } catch {
     return rawDate;
   }
@@ -106,11 +115,10 @@ const formatISTDate = (rawDate) => {
 const formatISTTime = (rawDate) => {
   if (!rawDate) return "";
   try {
-    const d = new Date(rawDate);
-    if (isNaN(d) || rawDate.length <= 10) return "";
-    // UTC ko IST mein convert karo
-    const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
-    return ist.toLocaleTimeString("en-IN", {hour:"2-digit", minute:"2-digit"});
+    if (String(rawDate).length <= 10) return "";
+    const d = parseISTAware(rawDate);
+    if (isNaN(d)) return "";
+    return d.toLocaleTimeString("en-IN", {hour:"2-digit", minute:"2-digit", timeZone: "Asia/Kolkata"});
   } catch {
     return "";
   }
@@ -2201,7 +2209,7 @@ const BillHistory = ({ sales, setSales, products, setProducts, customers, setCus
             <span style={{ fontSize:11.5, color:"#9ca3af", fontWeight:600 }}>{grouped[date].length} bills • ₹{grouped[date].reduce((a,s)=>a+getCurrentVersion(s).total,0).toLocaleString()}</span>
           </div>
           <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-            {[...grouped[date]].sort((a,b) => (getCurrentVersion(b).date||b.date||"").localeCompare(getCurrentVersion(a).date||a.date||"")||b.id-a.id).map(sale => {
+            {grouped[date].map(sale => {
               const v = getCurrentVersion(sale);
               const hasVersions = (sale.versions?.length||1) > 1;
               const cardSummary = calcBillSummary(v.items ? v : sale);
@@ -2501,25 +2509,29 @@ const loadJsPDF = () => new Promise((resolve, reject) => {
 });
 
 // Date helpers — used in PDF + WhatsApp text
-// BUG FIX: Convert UTC to IST before formatting
+// BUG FIX: pehle yahan manually +5:30 hours add kiya jaata tha assuming date
+// string plain UTC hai — lekin mobile app date ko already "+05:30" offset ke
+// saath store karta hai (aur PC khud bhi .toISOString() se 'Z' ke saath UTC
+// store karta hai), toh new Date(d) already sahi absolute time deta hai.
+// Extra +5:30 add karna DOUBLE-SHIFT tha — isi wajah se print par galat time
+// (5:13pm jaisa) aata tha jab asal time 11:43pm tha.
+// Saath hi, ab display explicitly "Asia/Kolkata" timezone mein hoti hai —
+// isliye PC ki apni system clock/timezone galat set ho tab bhi bill ka time
+// hamesha sahi IST dikhega.
 const parseBillDate = (d) => {
   if (!d) return new Date();
-  const dt = new Date(d);
-  if (isNaN(dt)) return new Date();
-  // Convert UTC to IST
-  return new Date(dt.getTime() + 5.5 * 60 * 60 * 1000);
+  const dt = parseISTAware(d);
+  return isNaN(dt) ? new Date() : dt;
 };
-const fmtBillDate = (d) => parseBillDate(d).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
-const fmtBillTime = (d) => parseBillDate(d).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+const fmtBillDate = (d) => parseBillDate(d).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" });
+const fmtBillTime = (d) => parseBillDate(d).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
 // Global friendly date formatter — ISO string ko "9 Mar 2026" format mein
 const fmtDateFriendly = (raw) => {
   if (!raw) return "—";
   try {
-    const d = new Date(raw);
+    const d = parseBillDate(raw);
     if (isNaN(d)) return raw;
-    // Convert UTC to IST
-    const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
-    return ist.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+    return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
   } catch { return raw; }
 };
 
@@ -2594,7 +2606,9 @@ const generatePDFBlob = async (bill, shopName) => {
   let y = 0;
 
   const bold = () => doc.setFont("helvetica", "bold");
-  const reg  = () => doc.setFont("helvetica", "normal");
+  // Everything prints bold now — thermal printers fade "normal" weight text
+  // to the point it's hard to read, so reg() is just an alias for bold().
+  const reg  = () => doc.setFont("helvetica", "bold");
   const sz   = (s) => doc.setFontSize(s);
   const black = () => doc.setTextColor(0, 0, 0);
   const gray  = () => doc.setTextColor(80, 80, 80);
@@ -2611,11 +2625,11 @@ const generatePDFBlob = async (bill, shopName) => {
   };
   const right = (txt, cy, fsz, isBold) => {
     sz(fsz); if (isBold) bold(); else reg();
-    doc.text(String(txt), W - 4, cy, { align: "right" });
+    doc.text(String(txt), W - 6, cy, { align: "right" });
   };
   const left = (txt, cy, fsz, isBold) => {
     sz(fsz); if (isBold) bold(); else reg();
-    doc.text(String(txt), 4, cy);
+    doc.text(String(txt), 5, cy);
   };
   // eslint-disable-next-line no-unused-vars
   const row2 = (lbl, val, cy, boldVal) => {
@@ -2635,7 +2649,7 @@ const generatePDFBlob = async (bill, shopName) => {
   if (SHOP_GST)   { gray(); center(`GST: ${SHOP_GST}`, y, 6.5, false); y += 4; }
   y += 1;
 
-  line(3, y, W - 3, y);
+  line(4, y, W - 5, y);
   y += 4;
 
   // Bill info
@@ -2654,25 +2668,25 @@ const generatePDFBlob = async (bill, shopName) => {
   }
 
   y += 2;
-  line(3, y, W - 3, y);
+  line(4, y, W - 5, y);
   y += 4;
 
   // ── COLUMN HEADERS ──
   lgray(); sz(6.5); bold();
-  doc.text("ITEM", 4, y);
+  doc.text("ITEM", 5, y);
   doc.text("MRP", W * 0.52, y);
   doc.text("RATE", W * 0.68, y);
-  doc.text("TOTAL", W - 4, y, { align: "right" });
+  doc.text("TOTAL", W - 6, y, { align: "right" });
   y += 2;
-  line(3, y, W - 3, y);
+  line(4, y, W - 5, y);
   y += 4;
 
   // ── ITEMS ──
   itemData.forEach((d, idx) => {
     const { item, mrpPc, qty, ratePc, effTotal } = d; // rateTotal accessed as d.rateTotal below
     const nameRaw  = item.name || "";
-    const maxW     = W - 8;
-    const nameFull = qty > 1 ? `${nameRaw} x${qty}` : nameRaw;
+const maxW     = W - 8;
+const nameFull = nameRaw;
     // Wrap long names
     const words = nameFull.split(" ");
     let line1 = "", line2 = "";
@@ -2682,48 +2696,48 @@ const generatePDFBlob = async (bill, shopName) => {
       else line2 += w + " ";
     }
     black(); bold(); sz(8);
-    doc.text(line1.trim(), 4, y);
-    if (line2.trim()) { y += 4; lgray(); reg(); sz(7); doc.text(line2.trim(), 4, y); }
+    doc.text(line1.trim(), 5, y);
+    if (line2.trim()) { y += 4; lgray(); reg(); sz(7); doc.text(line2.trim(), 5, y); }
 
     // meta (SKU only - no size/color on bill)
     const skuStr = item.sku ? `SKU: ${item.sku}` : "";
-    if (skuStr) { y += 3.5; lgray(); reg(); sz(6.5); doc.text(skuStr, 4, y); }
+    if (skuStr) { y += 3.5; lgray(); reg(); sz(6.5); doc.text(skuStr, 5, y); }
 
 
     // prices on same row as name
     const baseY = y - (skuStr ? 3.5 : 0) - (line2.trim() ? 4 : 0);
-    // MRP col
-    if (mrpPc > 0) { lgray(); reg(); sz(7); doc.text(fmtN(mrpPc * qty), W * 0.52, baseY); }
+    // MRP col - show as per-piece with multiplier (e.g., "150/pc × 3" instead of "450")
+    if (mrpPc > 0) { lgray(); reg(); sz(7); doc.text(qty > 1 ? `${fmtN(mrpPc)}/pc × ${qty}` : `${fmtN(mrpPc)}/pc`, W * 0.52, baseY); }
     else            { lgray(); reg(); sz(7); doc.text("-", W * 0.52, baseY); }
     // Rate col
     gray(); reg(); sz(7); doc.text(fmtN(ratePc), W * 0.68, baseY);
     // Total col
-    black(); bold(); sz(8); doc.text(fmtN(effTotal), W - 4, baseY, { align: "right" });
+    black(); bold(); sz(8); doc.text(fmtN(effTotal), W - 6, baseY, { align: "right" });
 
     // item discount lines (MRP disc + item disc + bill disc)
     if (d.mrpSaveAmt > 0) {
       y += 3.5; lgray(); reg(); sz(6.5);
-      doc.text(`  MRP Discount: -Rs.${fmtN(d.mrpSaveAmt)}`, 4, y);
+      doc.text(`  MRP Discount: -Rs.${fmtN(d.mrpSaveAmt)}`, 5, y);
     }
     if (d.iDiscRs > 0) {
       y += 3.5; lgray(); reg(); sz(6.5);
-      doc.text(`  Item Discount: -Rs.${fmtN(d.iDiscRs)}`, 4, y);
+      doc.text(`  Item Discount: -Rs.${fmtN(d.iDiscRs)}`, 5, y);
     }
     const billDiscOnItemPdf2 = Math.max(0, Math.round((d.rateTotal - d.iDiscRs - d.settled) - d.effTotal));
     if (billDiscOnItemPdf2 > 0) {
       y += 3.5; lgray(); reg(); sz(6.5);
-      doc.text(`  Bill Discount: -Rs.${fmtN(billDiscOnItemPdf2)}`, 4, y);
+      doc.text(`  Bill Discount: -Rs.${fmtN(billDiscOnItemPdf2)}`, 5, y);
     }
     if (d.settled > 0) {
       y += 3.5; lgray(); reg(); sz(6.5);
-      doc.text(`  Less kiya: -Rs.${fmtN(d.settled)}`, 4, y);
+      doc.text(`  Less kiya: -Rs.${fmtN(d.settled)}`, 5, y);
     }
 
     y += 5;
-    if (idx < itemData.length - 1) { line(3, y - 2, W - 3, y - 2, true); }
+    if (idx < itemData.length - 1) { line(4, y - 2, W - 5, y - 2, true); }
   });
 
-  line(3, y, W - 3, y);
+  line(4, y, W - 5, y);
   y += 5;
 
   // ── SUMMARY (simple: MRP Total, Discount, TOTAL PAID) ──
@@ -2739,7 +2753,7 @@ const generatePDFBlob = async (bill, shopName) => {
     }
   }
 
-  line(3, y - 1, W - 3, y - 1);
+  line(4, y - 1, W - 5, y - 1);
   y += 2;
   // BUG6 FIX: agar partial payment — pehle Bill Total, phir Amount Received dikhao
   if (balance > 0) {
@@ -2750,7 +2764,7 @@ const generatePDFBlob = async (bill, shopName) => {
     black(); left("AMOUNT RECEIVED", y, 9, true);
     black(); right(fmt(received), y, 9, true);
     y += 6;
-    line(3, y - 1, W - 3, y - 1);
+    line(4, y - 1, W - 5, y - 1);
     y += 2;
     black(); left("Balance Due", y, 8, true);
     black(); right(fmt(balance), y, 8, true);
@@ -2764,14 +2778,14 @@ const generatePDFBlob = async (bill, shopName) => {
   // ── SAVINGS — totalSavings ab settled bhi include karta hai ──
   const mrpBasedSavingPDF = totalSavings;
   if (mrpBasedSavingPDF > 0) {
-    line(3, y - 1, W - 3, y - 1);
+    line(4, y - 1, W - 5, y - 1);
     y += 3;
     black(); center(`** You Saved: Rs.${fmtN(mrpBasedSavingPDF)} **`, y, 7.5, true);
     y += 5;
   }
 
   // ── FOOTER ──
-  line(3, y, W - 3, y, true);
+  line(4, y, W - 5, y, true);
   y += 5;
   lgray(); center("Thank You, Visit Again :)", y, 7, false);
   y += 4;
@@ -2781,17 +2795,200 @@ const generatePDFBlob = async (bill, shopName) => {
   return { blob: doc.output("blob"), filename };
 };
 
-// Print: open PDF in new tab with print dialog
-const printBillPDF = async (bill, shopName) => {
+// ── Print bill using the SAME HTML/CSS template as the mobile app ──
+// (jsPDF above draws text at hardcoded x/y coordinates, which is why bold
+// text — being wider — was overlapping separator lines and running past
+// the right edge. HTML/CSS lets the browser handle wrapping and spacing
+// properly, and gives an IDENTICAL look to the mobile app's receipt.)
+const buildBillHTML = (bill, shopName) => {
+  let SHOP_NAME = "JB Fashion";
+  let SHOP_ADDR1 = "";
+  let SHOP_ADDR2 = "";
+  let SHOP_PHONE = "";
   try {
-    const { blob, filename } = await generatePDFBlob(bill, shopName);
-    const url = URL.createObjectURL(blob);
-    const w = window.open(url, "_blank");
-    if (!w) {
-      // Fallback: direct download
-      const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
+    SHOP_NAME  = localStorage.getItem('shopName')    || shopName || "JB Fashion";
+    const addr = localStorage.getItem('shopAddress') || "";
+    if (addr) {
+      const parts = addr.split(',');
+      SHOP_ADDR1 = parts.slice(0, -1).join(',').trim() || addr;
+      SHOP_ADDR2 = parts[parts.length - 1].trim() || "";
     }
-  } catch(e) { alert("PDF error: " + e.message); }
+    SHOP_PHONE = localStorage.getItem('shopPhone') || "";
+  } catch(e) {}
+
+  const fmtN = (n) => Number(n || 0).toLocaleString("en-IN");
+
+  const items = bill.items || [];
+  const itemData = items.map(item => {
+    const mrpPc    = item.mrpPerPiece || 0;
+    const qty      = item.qty || 1;
+    const ratePc   = item.price || 0;
+    const rateTotal = ratePc * qty;
+    const mrpTotal  = mrpPc > 0 ? mrpPc * qty : rateTotal;
+    const mrpSaveAmt = mrpPc > ratePc ? (mrpPc - ratePc) * qty : 0;
+    const iDiscRs   = item.itemDiscountRs || 0;
+    const settled   = item.settledDisc || 0;
+    const effTotal  = item.effectiveTotal !== undefined
+      ? item.effectiveTotal
+      : Math.max(0, rateTotal - iDiscRs - settled);
+    const billDiscOnItem = Math.max(0, Math.round((rateTotal - iDiscRs - settled) - effTotal));
+    return { item, mrpPc, qty, ratePc, rateTotal, mrpTotal, mrpSaveAmt, iDiscRs, settled, effTotal, billDiscOnItem };
+  });
+
+  const totalPcs      = itemData.reduce((a, d) => a + d.qty, 0);
+  const pdfMRPTotal   = itemData.reduce((a, d) => a + d.mrpTotal, 0);
+  const mrpSavings    = itemData.reduce((a, d) => a + d.mrpSaveAmt, 0);
+  const settledInPdf  = itemData.reduce((a, d) => a + d.settled, 0);
+  const itemDiscTotal = itemData.reduce((a, d) => a + d.iDiscRs, 0);
+  const billDiscAmt   = bill.billDiscount || 0;
+  const legacyDisc    = (!bill.itemDiscountTotal && !bill.billDiscount && bill.discount) ? Math.max(0, bill.discount - settledInPdf) : 0;
+  const totalSavings  = mrpSavings + itemDiscTotal + billDiscAmt + legacyDisc + settledInPdf;
+  const totalPayable  = bill.total || 0;
+  const received      = bill.received ?? totalPayable;
+  const balance       = totalPayable - received;
+
+  const itemRowsHTML = itemData.map((d, idx) => {
+    const skuStr = d.item.sku ? `SKU: ${d.item.sku}` : "";
+    let row = `<tr>
+      <td class="iname" colspan="2">${idx+1}. ${d.item.name}${skuStr ? `<div class="sku">${skuStr}</div>` : ''}</td>
+      <td class="mrpc">${d.mrpPc > 0 ? `${fmtN(d.mrpPc)}/pc${d.qty > 1 ? ` × ${d.qty}` : ''}` : '-'}</td>
+      <td class="ratec">${fmtN(d.ratePc)}</td>
+      <td class="totc">${fmtN(d.rateTotal)}</td>
+    </tr>`;
+    if (d.mrpSaveAmt > 0)      row += `<tr><td class="disc-label" colspan="4">  MRP Discount</td><td class="disc-amt">-₹${fmtN(d.mrpSaveAmt)}</td></tr>`;
+    if (d.iDiscRs > 0)         row += `<tr><td class="disc-label" colspan="4">  Item Discount</td><td class="disc-amt">-₹${fmtN(d.iDiscRs)}</td></tr>`;
+    if (d.billDiscOnItem > 0)  row += `<tr><td class="disc-label" colspan="4">  Bill Discount</td><td class="disc-amt">-₹${fmtN(d.billDiscOnItem)}</td></tr>`;
+    if (d.settled > 0)         row += `<tr><td class="disc-label" colspan="4">  Less kiya</td><td class="disc-amt">-₹${fmtN(d.settled)}</td></tr>`;
+    if (d.mrpSaveAmt > 0 || d.iDiscRs > 0 || d.billDiscOnItem > 0 || d.settled > 0) {
+      row += `<tr class="item-eff"><td colspan="4">Item Total</td><td class="totc">₹${fmtN(d.effTotal)}</td></tr>`;
+    }
+    row += `<tr class="sep-row"><td colspan="5"><div class="sep2"></div></td></tr>`;
+    return row;
+  }).join('');
+
+  const dateStr = fmtBillDate(bill.date);
+  const timeStr = fmtBillTime(bill.date);
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>${bill.billNo}</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  /* mm-based sizing (not px) — keeps text the correct physical size no
+     matter what the browser assumes about screen DPI. */
+  @page { size: 80mm auto; margin: 0; }
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    font-weight: bold;
+    font-size: 3.4mm;
+    width: 80mm;
+    max-width: 80mm;
+    color: #000;
+    background: #fff;
+    padding: 3mm 4mm;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  .shop-name { font-size: 5.2mm; font-weight: bold; text-align: center; margin-bottom: 1mm; }
+  .shop-sub  { font-size: 2.9mm; font-weight: bold; text-align: center; }
+  .sep  { border: none; border-top: 0.4mm dashed #000; margin: 1.5mm 0; }
+  .sep2 { border: none; border-top: 0.3mm dotted #555; margin: 1mm 0; }
+  .bill-info { font-size: 3.4mm; margin: 1mm 0; }
+  .bill-info td { padding: 0.5mm 0; font-weight: bold; }
+  .bill-no { font-weight: bold; font-size: 3.6mm; }
+  th { font-size: 3mm; font-weight: bold; border-bottom: 0.4mm solid #000; padding-bottom: 1mm; text-align: left; }
+  .iname { font-size: 3.4mm; font-weight: bold; padding-top: 1.5mm; }
+  .sku { font-size: 2.7mm; font-weight: bold; }
+  .mrpc, .ratec { text-align: right; font-size: 3mm; font-weight: bold; white-space: nowrap; padding-left: 1mm; }
+  .totc { text-align: right; font-size: 3.4mm; font-weight: bold; white-space: nowrap; }
+  .disc-label { font-size: 2.9mm; font-weight: bold; padding-left: 1mm; }
+  .disc-amt   { text-align: right; font-size: 2.9mm; font-weight: bold; }
+  .item-eff td { padding-bottom: 1mm; font-weight: bold; }
+  .sep-row td { padding: 0.5mm 0; }
+  .sum-row td { padding: 0.5mm 0; font-size: 3.2mm; font-weight: bold; }
+  .sum-row .val { text-align: right; }
+  .total-row td { font-size: 4.2mm; font-weight: bold; padding: 1mm 0; }
+  .total-row .val { text-align: right; }
+  .balance-row td { font-size: 3.2mm; font-weight: bold; padding: 0.5mm 0; }
+  .balance-row .val { text-align: right; }
+  .saved-box { text-align: center; font-size: 3.2mm; font-weight: bold; margin: 1.5mm 0; border: 0.4mm dashed #000; padding: 1.5mm; }
+  .footer { text-align: center; font-size: 3mm; font-weight: bold; margin-top: 2mm; }
+  .footer .thanks { font-size: 3.6mm; font-weight: bold; margin-bottom: 0.5mm; }
+</style>
+</head>
+<body>
+
+  <div class="shop-name">${SHOP_NAME}</div>
+  ${SHOP_ADDR1 ? `<div class="shop-sub">${SHOP_ADDR1}</div>` : ''}
+  ${SHOP_ADDR2 ? `<div class="shop-sub">${SHOP_ADDR2}</div>` : ''}
+  ${SHOP_PHONE ? `<div class="shop-sub">Ph: ${SHOP_PHONE}</div>` : ''}
+
+  <hr class="sep"/>
+
+  <table class="bill-info">
+    <tr><td class="bill-no">${bill.billNo}</td><td style="text-align:right">${dateStr}</td></tr>
+    <tr><td colspan="2" style="text-align:right; font-weight:normal;">${timeStr}</td></tr>
+    ${(bill.customer && bill.customer !== 'Walk-in') ? `<tr><td colspan="2">${bill.customer}${bill.phone ? ` | ${bill.phone}` : ''}</td></tr>` : ''}
+  </table>
+
+  <hr class="sep"/>
+
+  <table>
+    <tr>
+      <th colspan="2">ITEM</th>
+      <th style="text-align:right">MRP</th>
+      <th style="text-align:right">RATE</th>
+      <th style="text-align:right">TOTAL</th>
+    </tr>
+    ${itemRowsHTML}
+  </table>
+
+  <hr class="sep"/>
+
+  <table>
+    ${pdfMRPTotal > totalPayable ? `<tr class="sum-row"><td class="lbl">MRP Total (${totalPcs} pcs)</td><td class="val">₹${fmtN(pdfMRPTotal)}</td></tr>` : ''}
+    ${(pdfMRPTotal > totalPayable && totalSavings > 0) ? `<tr class="sum-row"><td class="lbl">Total Discount</td><td class="val">-₹${fmtN(totalSavings)}</td></tr>` : ''}
+  </table>
+
+  <hr class="sep"/>
+
+  <table>
+    ${balance > 0 ? `
+      <tr class="sum-row"><td class="lbl">Bill Total</td><td class="val">₹${fmtN(totalPayable)}</td></tr>
+      <tr class="total-row"><td class="lbl">AMOUNT RECEIVED</td><td class="val">₹${fmtN(received)}</td></tr>
+      <tr class="balance-row"><td class="lbl">Balance Due</td><td class="val">₹${fmtN(balance)}</td></tr>
+    ` : `
+      <tr class="total-row"><td class="lbl">TOTAL PAID</td><td class="val">₹${fmtN(totalPayable)}</td></tr>
+    `}
+  </table>
+
+  ${totalSavings > 0 ? `<div class="saved-box">** You Saved: ₹${fmtN(totalSavings)} **</div>` : ''}
+
+  <div class="footer">
+    <div class="thanks">Thank You, Visit Again :)</div>
+    <div>${SHOP_NAME}</div>
+  </div>
+
+  <script>
+    window.onload = function() { window.print(); };
+    window.onafterprint = function() { window.close(); };
+  </script>
+</body>
+</html>`;
+};
+
+// Print: open the HTML receipt (same template as mobile) in a new tab —
+// browser's own print dialog handles it, no more clipped/overlapping text.
+const printBillHTML = (bill, shopName) => {
+  try {
+    const html = buildBillHTML(bill, shopName);
+    const w = window.open("", "_blank");
+    if (!w) { alert("Popup blocked — is browser mein popups allow karo printing ke liye."); return; }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  } catch(e) { alert("Print error: " + e.message); }
 };
 
 // WhatsApp icon
@@ -2954,7 +3151,7 @@ const BillActions = ({ bill, shopName, onClose, showNewBill }) => {
       </button>
       {/* Print */}
       <button
-        onClick={() => printBillPDF(bill, shopName)}
+        onClick={() => printBillHTML(bill, shopName)}
         style={{ padding: "9px 0", background: "none", border: "1.5px solid #e5e7eb", borderRadius: 10, fontWeight: 600, fontSize: 12.5, cursor: "pointer", color: "#374151", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
       >
         🖨️ Print
@@ -3045,9 +3242,10 @@ const LABEL_SIZES = [
   { id: "2x2", title: '2" × 2"', wMm: 51, hMm: 51 },
   { id: "2x1", title: '2" × 1"', wMm: 51, hMm: 25 },
 ];
-const DEFAULT_FONT_PT = { name: 8.5, sku: 6, price: 12 };
-// Bold defaults — product name & price bold by default, SKU normal (matches old hardcoded look)
-const DEFAULT_BOLD = { name: true, sku: false, price: true };
+const DEFAULT_FONT_PT = { name: 8.5, sku: 9, price: 12 };
+// Bold defaults — name, SKU aur price sab bold by default (SKU pehle chhota+normal
+// tha isliye label par mushkil se dikhta tha)
+const DEFAULT_BOLD = { name: true, sku: true, price: true };
 // Font/bold settings are saved PER label size (3x2, 2x1, 2x2 sab alag-alag) so editing one
 // size's font never disturbs another size's saved settings. Persists in localStorage until
 // the user changes it again.
@@ -3180,8 +3378,14 @@ const LabelPrinter = ({ products, onClose, initialProduct = null, initialQty = 1
   useEffect(() => {
     if (!barcodeLibReady || !selectedProduct || !previewBarcodeRef.current || !window.JsBarcode) return;
     const info = getLabelInfo(selectedProduct, selectedVariant);
-    const value = info.sku || (info.name || "").substring(0, 12).replace(/\s/g, "");
+    let value = info.sku || (info.name || "").substring(0, 12).replace(/\s/g, "");
     if (!value) return;
+    
+    // FIX: Pad short SKU codes so mobile scanners can read them reliably
+    // Minimum 5 characters needed for proper barcode thickness/readability
+    // "J" becomes "0000J", "KT-001" becomes "KT001" (special chars removed)
+    value = value.replace(/[^a-zA-Z0-9]/g, "").padStart(5, "0");
+    
     try {
       window.JsBarcode(previewBarcodeRef.current, value, {
         format: "CODE128",
@@ -3211,6 +3415,12 @@ const LabelPrinter = ({ products, onClose, initialProduct = null, initialQty = 1
   const printLabels = () => {
     if (!selectedProduct) return;
     const info = getLabelInfo(selectedProduct, selectedVariant);
+    // SKU ke bina barcode product NAME se banta tha — jo scan-lookup se kabhi
+    // match nahi hota (SKU khaali label print ho jaata tha lekin scan fail hota tha).
+    if (!info.sku) {
+      alert("SKU khaali hai! Aise print kiya gaya barcode scan nahi hoga. Pehle SKU bharo — 'Label Edit Karo' se ya Inventory mein product edit karke.");
+      return;
+    }
     // Open print window with label HTML
     const labelHTML = generateLabelHTML(info, qty);
     const w = window.open("", "_blank", "width=400,height=600");
@@ -3230,7 +3440,7 @@ const LabelPrinter = ({ products, onClose, initialProduct = null, initialQty = 1
     const labelsArr = Array.from({ length: copies }).map((_, i) => `
       <div class="label" id="lbl${i}">
         <div class="shop-name">${localStorage.getItem('shopName') || 'FashionPro'}</div>
-        <div class="prod-name">${info.name}${info.size ? ` — ${info.size}` : ''}</div>
+        <div class="prod-name">${info.name}</div>
         <div class="sku">SKU: ${info.sku}</div>
         <div class="barcode-wrap">
           <svg class="barcode" id="bc${i}"></svg>
@@ -3244,8 +3454,13 @@ const LabelPrinter = ({ products, onClose, initialProduct = null, initialQty = 1
       </div>
     `).join('');
 
+    // FIX: Pad short SKU codes (like "J") so barcodes are thick enough to scan
+    const barcodeValue = (info.sku || info.name.substring(0,12).replace(/\s/g,''))
+      .replace(/[^a-zA-Z0-9]/g, '')  // remove special chars
+      .padStart(5, '0');              // pad to min 5 chars: "J" → "0000J"
+    
     const barcodeInits = Array.from({ length: copies }).map((_, i) => `
-      JsBarcode("#bc${i}", "${info.sku || info.name.substring(0,12).replace(/\s/g,'')}", {
+      JsBarcode("#bc${i}", "${barcodeValue}", {
         format: "CODE128",
         width: 1.3,
         height: ${barcodeHeightPx},
@@ -3414,7 +3629,7 @@ window.onafterprint = function() { window.close(); };
                         {localStorage.getItem('shopName') || 'FashionPro'}
                       </div>
                       <div style={{ fontSize: `${fontPt.name}pt`, fontWeight: fontBold.name ? "bold" : "normal", color: "#111", textAlign: "center", lineHeight: 1.2 }}>
-                        {info.name}{info.size ? ` — ${info.size}` : ""}
+                        {info.name}
                       </div>
                       <div style={{ fontSize: `${fontPt.sku}pt`, fontWeight: fontBold.sku ? "bold" : "normal", color: "#888" }}>SKU: {info.sku}</div>
                       {/* Real barcode — same JsBarcode library used for actual printing, white background, black bars only */}
@@ -3545,10 +3760,29 @@ window.onafterprint = function() { window.close(); };
               Print karte waqt Paper Size = <b>{labelSize.wMm}mm × {labelSize.hMm}mm ({labelSize.title})</b> set karo. Margin = 0. Scale = 100%.
             </div>
 
+            {/* SKU missing warning — yehi wajah hai jab label print toh ho jaata hai
+                lekin scan nahi hota: SKU khaali hone par barcode product NAME se
+                banta tha, jo scan-lookup se kabhi match nahi hota (wo sirf SKU/barcode
+                field check karta hai). Isliye print se pehle SKU zaroor bharo. */}
+            {(() => {
+              const info = getLabelInfo(selectedProduct, selectedVariant);
+              if (info.sku) return null;
+              return (
+                <div style={{ background: "#fef2f2", border: "1.5px solid #fecaca", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 12.5, color: "#b91c1c", fontWeight: 600 }}>
+                  ⚠️ Is product ka SKU khaali hai — aise print kiya gaya barcode SCAN NAHI HOGA
+                  (barcode product ke naam se banega, jo scan par match nahi karta).
+                  Upar "✏️ Label Edit Karo" mein SKU bhar do, ya Inventory mein product edit karke SKU add karo.
+                </div>
+              );
+            })()}
+
             <button
               onClick={printLabels}
+              disabled={!getLabelInfo(selectedProduct, selectedVariant).sku}
               className="btn btn-primary"
-              style={{ width: "100%", justifyContent: "center", padding: "12px", fontSize: 15, fontWeight: 700 }}>
+              style={{ width: "100%", justifyContent: "center", padding: "12px", fontSize: 15, fontWeight: 700,
+                opacity: getLabelInfo(selectedProduct, selectedVariant).sku ? 1 : 0.5,
+                cursor: getLabelInfo(selectedProduct, selectedVariant).sku ? "pointer" : "not-allowed" }}>
               🖨️ {qty} Label{qty > 1 ? "s" : ""} Print Karo
             </button>
           </>
@@ -5104,18 +5338,18 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
                     <td>
                       <div>
                         <input type="number" onWheel={e=>e.target.blur()} value={item.price} onChange={e => setCart(prev => prev.map((it,j) => j===i ? {...it, price: +e.target.value} : it))} style={{ width: 70, border: "1.5px solid #e5e7eb", borderRadius: 6, padding: "4px 8px", fontWeight: 600 }} />
-                        {/* MRP per piece info */}
-                        {item.mrpPerPiece > 0 && (
-                          <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2, textDecoration: "line-through" }}>
-                            MRP ₹{item.mrpPerPiece}/pc{item.piecesPerBox > 1 ? ` (box ₹${item.mrp}÷${item.piecesPerBox})` : ""}
-                          </div>
-                        )}
-                        {item.mrpPerPiece > 0 && item.price < item.mrpPerPiece && (
-                          <div style={{ fontSize: 10, color: "#059669", fontWeight: 700 }}>
-                            saves ₹{item.mrpPerPiece - item.price}/pc
-                          </div>
-                        )}
-                        {item.qty > 1 && <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>×{item.qty} = ₹{(item.price * item.qty).toLocaleString()}</div>}
+                       {/* MRP per piece info with quantity breakdown */}
+{item.mrpPerPiece > 0 && (
+  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2, textDecoration: "line-through" }}>
+    MRP ₹{item.mrpPerPiece}/pc × {item.qty} = ₹{(item.mrpPerPiece * item.qty).toLocaleString()}{item.piecesPerBox > 1 ? ` (box ₹${item.mrp}÷${item.piecesPerBox})` : ""}
+  </div>
+)}
+{item.mrpPerPiece > 0 && item.price < item.mrpPerPiece && (
+  <div style={{ fontSize: 10, color: "#059669", fontWeight: 700 }}>
+    −₹{((item.mrpPerPiece - item.price) * item.qty).toLocaleString()} saved
+  </div>
+)}
+{item.qty > 1 && <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2, fontWeight: 600 }}>Rate ₹{item.price}/pc × {item.qty} = ₹{(item.price * item.qty).toLocaleString()}</div>}
                       </div>
                     </td>
                     <td>
