@@ -295,7 +295,7 @@ const LoginScreen = ({ onLogin }) => {
 // Dashboard, BillHistory, Customers, Reports — all use this one component
 // Features: Replace Item, Return Items, Undo, Delete Invoice, version history
 // ============================================================
-const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setActiveTab, setGlobalInvoiceSale, setHighlightPhone, setInventoryNav, setSales, setProducts, setCustomers }) => {
+const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setActiveTab, setGlobalInvoiceSale, setHighlightPhone, setInventoryNav, setSales, setProducts, setCustomers, showToast }) => {
   const nowISO = () => new Date().toISOString();
 
   // ── Local state for current sale (so actions update UI immediately) ──
@@ -1878,6 +1878,7 @@ export default function App() {
               setSales={setSales}
               setProducts={setProducts}
               setCustomers={setCustomers}
+              showToast={showToast}
             />
           )}
         </div>
