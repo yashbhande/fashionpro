@@ -3801,7 +3801,8 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
   const [labelPrinterProduct, setLabelPrinterProduct] = useState(null); // preselected product — skips search
   const [labelPrinterQty, setLabelPrinterQty] = useState(1);
   const [postSaveLabelPrompt, setPostSaveLabelPrompt] = useState(null); // { product, suggestedQty } shown right after Add/Edit save
-  const [sortBy, setSortBy] = useState("name"); // name | stock_asc | stock_desc | price_asc | price_desc | margin_desc
+  const [sortBy, setSortBy] = useState("name"); // name | stock_asc | stock_desc | price_asc | price_desc | margin_desc | recent
+  const [recentFilter, setRecentFilter] = useState("all"); // all | 7days | 30days
   const [showModal, setShowModal] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
   const [editSkuId, setEditSkuId] = useState(null); // inline SKU edit
@@ -3819,11 +3820,47 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
   });
   const [useSizeVariants, setUseSizeVariants] = useState(false); // toggle per product
 
+  // Helper: Extract timestamp from ID (format: "timestamp_random" or just "timestamp")
+  const getTimestampFromId = (productId) => {
+    const idStr = String(productId || '0');
+    // Split by underscore and take first part (the timestamp)
+    const ts = parseInt(idStr.split('_')[0]) || 0;
+    return ts;
+  };
+
+  // Helper: Check if product is recently added — MUST BE BEFORE filtered!
+  const isRecentProduct = (productId, days) => {
+    const now = Date.now();
+    const ts = getTimestampFromId(productId);
+    const productAge = now - ts;
+    const daysInMs = days * 24 * 60 * 60 * 1000;
+    return productAge <= daysInMs;
+  };
+
+  // Helper: Get product added date (format: "12 Jul 2024" or "2 hours ago")
+  const getProductDateStr = (productId) => {
+    const ts = getTimestampFromId(productId);
+    if (!ts) return "";
+    
+    const date = new Date(ts);
+    const now = new Date();
+    const diff = now - date;
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    
+    if (hours < 1) return "Just now";
+    if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+    if (days < 7) return `${days} day${days > 1 ? 's' : ''} ago`;
+    
+    return date.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  };
+
   const filtered = products
     .filter(p =>
       (catFilter === "All" || p.category === catFilter) &&
       (p.name.toLowerCase().includes(search.toLowerCase()) || p.category.toLowerCase().includes(search.toLowerCase()) || (p.brand||"").toLowerCase().includes(search.toLowerCase()) || (p.sku||"").toLowerCase().includes(search.toLowerCase()) || (p.supplier||"").toLowerCase().includes(search.toLowerCase())) &&
-      (stockFilter === "all" || (stockFilter === "out" && p.quantity === 0) || (stockFilter === "low" && p.quantity > 0 && p.quantity <= 5) || (stockFilter === "ok" && p.quantity > 5))
+      (stockFilter === "all" || (stockFilter === "out" && p.quantity === 0) || (stockFilter === "low" && p.quantity > 0 && p.quantity <= 5) || (stockFilter === "ok" && p.quantity > 5)) &&
+      (recentFilter === "all" || (recentFilter === "7days" && isRecentProduct(p.id, 7)) || (recentFilter === "30days" && isRecentProduct(p.id, 30)))
     )
     .sort((a, b) => {
       if (search.trim()) {
@@ -3831,6 +3868,7 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
         if (r !== 0) return r;
       }
       if (sortBy === "name")        return a.name.localeCompare(b.name);
+      if (sortBy === "recent")      return getTimestampFromId(b.id) - getTimestampFromId(a.id); // Newest first
       if (sortBy === "stock_asc")   return a.quantity - b.quantity;
       if (sortBy === "stock_desc")  return b.quantity - a.quantity;
       if (sortBy === "price_asc")   return (a.sellingPrice||0) - (b.sellingPrice||0);
@@ -3963,7 +4001,7 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
       const qtyAdded = (productData.quantity || 0) - (editProduct.quantity || 0);
       setPostSaveLabelPrompt({ product: { ...productData, id: editProduct.id }, suggestedQty: qtyAdded > 0 ? qtyAdded : 1 });
     } else {
-      const newProduct = { ...productData, id: Date.now() };
+      const newProduct = { ...productData, id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
       setProducts([...products, newProduct]);
       showToast("Product add ho gaya!");
       // Ask right away whether labels are needed — no need to search for this product again
@@ -4072,6 +4110,7 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
           {/* Sort */}
           <select className="select" value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{ width:"auto", padding:"6px 10px", fontSize:12.5 }}>
             <option value="name">Name A-Z</option>
+            <option value="recent">🕐 Recently Added</option>
             <option value="category">Category</option>
             <option value="stock_asc">Stock ↑ (Low first)</option>
             <option value="stock_desc">Stock ↓ (High first)</option>
@@ -4087,6 +4126,14 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
             <button key={v} onClick={()=>setStockFilter(v)} style={{ padding:"3px 12px", fontSize:11.5, fontWeight:600, borderRadius:16, border:`1.5px solid ${stockFilter===v?"#7c3aed":"#e5e7eb"}`, background:stockFilter===v?"#f5f3ff":"white", color:stockFilter===v?"#7c3aed":"#6b7280", cursor:"pointer" }}>{l}</button>
           ))}
           <span style={{ fontSize:11, color:"#9ca3af", marginLeft:"auto" }}>{filtered.length} products</span>
+        </div>
+
+        {/* Recently added filter chips */}
+        <div style={{ display:"flex", gap:5, alignItems:"center", flexWrap:"wrap", marginTop: 10 }}>
+          <span style={{ fontSize:11, fontWeight:700, color:"#9ca3af" }}>Added:</span>
+          {[["all","📅 All Time"],["7days","⭐ Last 7 Days"],["30days","✨ Last 30 Days"]].map(([v,l])=>(
+            <button key={v} onClick={()=>setRecentFilter(v)} style={{ padding:"3px 12px", fontSize:11.5, fontWeight:600, borderRadius:16, border:`1.5px solid ${recentFilter===v?"#f59e0b":"#e5e7eb"}`, background:recentFilter===v?"#fffbeb":"white", color:recentFilter===v?"#f59e0b":"#6b7280", cursor:"pointer" }}>{l}</button>
+          ))}
         </div>
       </div>
 
@@ -4122,6 +4169,9 @@ const Inventory = ({ products, setProducts, showToast, lowStockProducts, isAdmin
                   <tr key={p.id} id={`inv-product-${p.id}`}>
                     <td>
                       <div style={{ fontWeight: 600, color: "#111827" }}>{p.name}</div>
+                      {isRecentProduct(p.id, 7) && (
+                        <div style={{ fontSize: 10, background: "#fef3c7", color: "#92400e", padding: "2px 8px", borderRadius: 4, fontWeight: 600, display: "inline-block", marginTop: 3 }}>⭐ Added {getProductDateStr(p.id)}</div>
+                      )}
                       {editSkuId === p.id ? (
                         <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
                           <input
