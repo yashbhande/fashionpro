@@ -640,6 +640,7 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
 
   const vTypeLabel = { original: { text: "Original", color: "#6b7280" }, replace: { text: "🔄 Replaced", color: "#d97706" }, return: { text: "↩️ Returned", color: "#dc2626" } };
 
+  
   const billDate = formatISTDate(cv.date||curSale.date);
   const billTime = formatISTTime(cv.date||curSale.date);
 
