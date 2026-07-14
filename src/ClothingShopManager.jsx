@@ -629,8 +629,21 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
         }));
       }
       
-      return { ...p, quantity: newQty, sizeVariants: newVariants };
+      const updated = { ...p, quantity: newQty, sizeVariants: newVariants };
+      saveSingle('products', updated); // FIXED: Save to Firebase
+      return updated;
     }));
+    
+    // Restore customer totalSpent (refund logic)
+    if (setCustomers && curSale.phone) {
+      setCustomers(prev => prev.map(c => {
+        if (c.phone !== curSale.phone) return c;
+        const billTotal = curSale.total || 0;
+        const updated = { ...c, totalSpent: Math.max(0, c.totalSpent - billTotal) };
+        saveSingle('customers', updated); // FIXED: Save to Firebase
+        return updated;
+      }));
+    }
     
     // Now delete the invoice
     if (setSales) setSales(prev => prev.filter(s => s.id !== curSale.id));
