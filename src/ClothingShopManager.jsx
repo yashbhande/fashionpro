@@ -839,7 +839,7 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
                     <div style={{ textAlign:"center" }}>
                       <div style={{ color:"#6b7280", fontSize:12, fontWeight:600 }}>₹{item.price}/pc</div>
                       {item.mrpPerPiece > 0 && item.mrpPerPiece !== item.price && (
-                        <div style={{ fontSize:10, color:"#9ca3af", textDecoration:"line-through" }}>MRP ₹{item.mrpPerPiece}</div>
+                        <div style={{ fontSize:10, color:"#9ca3af" }}>MRP ₹{item.mrpPerPiece}</div>
                       )}
                     </div>
                     <div style={{ textAlign:"right" }}>
@@ -3300,10 +3300,10 @@ const LABEL_SIZES = [
   { id: "2x2", title: '2" × 2"', wMm: 51, hMm: 51 },
   { id: "2x1", title: '2" × 1"', wMm: 51, hMm: 25 },
 ];
-const DEFAULT_FONT_PT = { name: 8.5, sku: 9, price: 12 };
+const DEFAULT_FONT_PT = { name: 8.5, sku: 9, price: 12, mrp: 9 };
 // Bold defaults — name, SKU aur price sab bold by default (SKU pehle chhota+normal
 // tha isliye label par mushkil se dikhta tha)
-const DEFAULT_BOLD = { name: true, sku: true, price: true };
+const DEFAULT_BOLD = { name: true, sku: true, price: true, mrp: false };
 // Font/bold settings are saved PER label size (3x2, 2x1, 2x2 sab alag-alag) so editing one
 // size's font never disturbs another size's saved settings. Persists in localStorage until
 // the user changes it again.
@@ -3558,7 +3558,7 @@ const LabelPrinter = ({ products, onClose, initialProduct = null, initialQty = 1
   .barcode-wrap { width: 100%; display: flex; justify-content: center; background: #ffffff; }
   .barcode { max-width: ${Math.round(wMm * 0.88)}mm; background: #ffffff; }
   .price-row { display: flex; align-items: center; gap: 4mm; justify-content: center; }
-  .mrp { font-size: 7pt; color: #888; text-decoration: line-through; }
+  .mrp { font-size: ${fontPt.mrp}pt; color: #9ca3af; font-weight: ${fontBold.mrp ? "bold" : "normal"}; }
   .rate { font-size: ${fontPt.price}pt; font-weight: ${fontBold.price ? "bold" : "normal"}; color: #000; }
   .rate.only { font-size: ${fontPt.price + 2}pt; }
   @media print {
@@ -3696,7 +3696,7 @@ window.onafterprint = function() { window.close(); };
                         {!barcodeLibReady && <span style={{ fontSize: 10, color: "#9ca3af" }}>Barcode load ho raha hai...</span>}
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        {info.discounted && <span style={{ fontSize: "7pt", color: "#888", textDecoration: "line-through" }}>MRP ₹{info.mrp}</span>}
+                        {info.discounted && <span style={{ fontSize: `${fontPt.mrp}pt`, fontWeight: fontBold.mrp ? "bold" : "normal", color: "#9ca3af" }}>MRP ₹{info.mrp}</span>}
                         <span style={{ fontSize: `${fontPt.price}pt`, fontWeight: fontBold.price ? "bold" : "normal", color: "#000" }}>₹{info.rate}</span>
                       </div>
                     </div>
@@ -3715,6 +3715,7 @@ window.onafterprint = function() { window.close(); };
                 {[
                   { key: "name", title: "Product Name" },
                   { key: "sku", title: "SKU" },
+                  { key: "mrp", title: "MRP" },
                   { key: "price", title: "Price" },
                 ].map(f => (
                   <div key={f.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
