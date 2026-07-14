@@ -590,8 +590,51 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
 
   // ── DELETE INVOICE ──
   const doDeleteInvoice = () => {
-    if (!window.confirm(`Invoice ${curSale.billNo} completely delete karna chahte ho? Yeh undo nahi hoga.`)) return;
+    if (!window.confirm(`Invoice ${curSale.billNo} completely delete karna chahte ho? Items wapis inventory mein add hogi.`)) return;
+    
+    // Restore inventory items from this invoice
+    const currentVersion = curSale.versions?.[curSale.currentVersion ?? curSale.versions.length - 1];
+    const itemsToRestore = currentVersion?.items || [];
+    
+    // Track return quantities by product ID
+    const returnMap = {}; // { productId: { baseQty: X, sizeVariants: { S: Y, M: Z } } }
+    
+    itemsToRestore.forEach(item => {
+      if (!item.productId) return;
+      if (!returnMap[item.productId]) {
+        returnMap[item.productId] = { baseQty: 0, sizeVariants: {} };
+      }
+      returnMap[item.productId].baseQty += item.qty || 0;
+      
+      // Track size-variant returns separately
+      if (item.size && item.size !== '-') {
+        returnMap[item.productId].sizeVariants[item.size] = 
+          (returnMap[item.productId].sizeVariants[item.size] || 0) + (item.qty || 0);
+      }
+    });
+    
+    // Apply inventory restoration
+    setProducts(prev => prev.map(p => {
+      if (!returnMap[p.id]) return p;
+      
+      const toReturn = returnMap[p.id];
+      const newQty = (p.quantity || 0) + toReturn.baseQty;
+      
+      // Restore size-variant stock if applicable
+      let newVariants = p.sizeVariants;
+      if (p.pricingType === 'size-variant' && newVariants?.length && Object.keys(toReturn.sizeVariants).length > 0) {
+        newVariants = newVariants.map(sv => ({
+          ...sv,
+          stock: (sv.stock || 0) + (toReturn.sizeVariants[sv.size] || 0)
+        }));
+      }
+      
+      return { ...p, quantity: newQty, sizeVariants: newVariants };
+    }));
+    
+    // Now delete the invoice
     if (setSales) setSales(prev => prev.filter(s => s.id !== curSale.id));
+    showToast?.(`Invoice ${curSale.billNo} deleted. Inventory restored! ✅`, 'success');
     onClose();
   };
 
