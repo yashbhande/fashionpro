@@ -4965,6 +4965,22 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
   const completeSale = () => {
     if (saleInProgress) return; // BUG29 FIX: double-click guard
     if (cart.length === 0) { showToast("Cart khali hai", "error"); return; }
+    
+    // ✅ NEW: Validate all size-variant items have size selected
+    const itemsWithoutSize = cart.filter(item => {
+      const product = products.find(p => p.id === item.productId);
+      return product?.pricingType === "size-variant" && (!item.size || item.size === "-");
+    });
+    
+    if (itemsWithoutSize.length > 0) {
+      const missingItems = itemsWithoutSize.map(i => i.name).join(", ");
+      showToast(
+        `❌ Size select karo: ${missingItems}`,
+        "error"
+      );
+      return;
+    }
+    
     // BUG30 FIX: ₹0 cart complete nahi hona chahiye
     if (finalTotal <= 0 && cart.some(it => it.price > 0)) { showToast("Bill total ₹0 nahi ho sakta!", "error"); return; }
     if (extraDiscount > 0 && Math.abs(totalSettled - extraDiscount) > 0) {
@@ -5028,22 +5044,39 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
       ...v0WithoutDiscount,
     };
     setSales([...sales, sale]);
-    // BUG8 FIX: size-variant products ke liye sizeVariants[].stock bhi deduct karo
+    // BUG8 FIX [UPDATED]: size-variant products ke liye sizeVariants[].stock bhi deduct karo
+    // BUG_INVENTORY_DEDUCT_FIX: Separate logic for general quantity vs size-specific stock
     cart.forEach(item => {
       if (!item.productId) return;
       setProducts(prev => prev.map(p => {
         if (p.id !== item.productId) return p;
+        
+        // Step 1: Always deduct from general quantity
         const newQty = Math.max(0, p.quantity - item.qty);
-        // Agar size-variant product hai aur item ka size set hai
-        if (p.pricingType === "size-variant" && item.size && item.size !== "-" && p.sizeVariants?.length) {
-          const newVariants = p.sizeVariants.map(sv =>
-            sv.size === item.size
-              ? { ...sv, stock: Math.max(0, (sv.stock || 0) - item.qty) }
-              : sv
-          );
-          return { ...p, quantity: newQty, sizeVariants: newVariants };
+        let updated = { ...p, quantity: newQty };
+        
+        // Step 2: If size-variant product, ALSO deduct from size-specific stock
+        // This logic is independent — doesn't depend on conditions above
+        if (p.pricingType === "size-variant" && p.sizeVariants?.length) {
+          const sizeToDeduct = item.size && item.size !== "-" ? item.size : null;
+          
+          if (sizeToDeduct) {
+            // Size is valid — deduct from this specific size variant
+            const newVariants = p.sizeVariants.map(sv =>
+              sv.size === sizeToDeduct
+                ? { ...sv, stock: Math.max(0, (sv.stock || 0) - item.qty) }
+                : sv
+            );
+            updated = { ...updated, sizeVariants: newVariants };
+          } else {
+            // Size is missing — log warning for debugging
+            console.warn(
+              `⚠️ [INVENTORY] Item "${item.name}" sold without size info. General stock deducted (${item.qty}), but size-variants untouched.`
+            );
+          }
         }
-        return { ...p, quantity: newQty };
+        
+        return updated;
       }));
     });
     if (customerName && customerPhone) {
@@ -5373,7 +5406,17 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
                             : null
                       }
                     </td>
-                    <td>{item.size !== "-" ? <span className="badge badge-blue">{item.size}</span> : <span style={{ color: "#d1d5db" }}>—</span>}</td>
+                    <td>
+                      {(() => {
+                        const product = products.find(p => p.id === item.productId);
+                        const isSizeVariant = product?.pricingType === "size-variant";
+                        const hasSize = item.size && item.size !== "-";
+                        
+                        if (hasSize) return <span className="badge badge-blue">{item.size}</span>;
+                        if (isSizeVariant) return <span style={{ color: "#dc2626", fontWeight: 700, fontSize: 12 }}>❌ NO SIZE</span>;
+                        return <span style={{ color: "#d1d5db" }}>—</span>;
+                      })()}
+                    </td>
                     <td>{item.color !== "-" ? item.color : <span style={{ color: "#d1d5db" }}>—</span>}</td>
                     <td>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
