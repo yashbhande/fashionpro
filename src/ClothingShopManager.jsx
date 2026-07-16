@@ -3296,6 +3296,7 @@ function usePrinterStatus() {
 // ============================================================
 // Common thermal label sizes shopkeepers use — user can switch since it varies by roll/printer
 const LABEL_SIZES = [
+  { id: "custom74x50", title: '74mm × 50mm (UPWADE)', wMm: 74, hMm: 50 },  // ← TERA PRINTER!
   { id: "3x2", title: '3" × 2"', wMm: 76, hMm: 51 },
   { id: "2x2", title: '2" × 2"', wMm: 51, hMm: 51 },
   { id: "2x1", title: '2" × 1"', wMm: 51, hMm: 25 },
@@ -3338,7 +3339,7 @@ const LabelPrinter = ({ products, onClose, initialProduct = null, initialQty = 1
   // Manual overrides so the label text can be edited before printing
   const [labelOverride, setLabelOverride] = useState(null); // { name, sku, size, mrp, rate }
   // Label paper size varies by printer/roll — let the user pick it instead of hardcoding
-  const [labelSizeId, setLabelSizeId] = useState("3x2");
+  const [labelSizeId, setLabelSizeId] = useState("custom74x50");  // ← Auto-select 74×50mm for UPWADE
   const labelSize = LABEL_SIZES.find(s => s.id === labelSizeId) || LABEL_SIZES[0];
   // Font size + bold for each text element — SAVED SEPARATELY PER LABEL SIZE, so 3x2 aur 2x1
   // ki settings kabhi mix nahi hoti. Jab tak khud change na karo, wahi saved rehta hai.
@@ -3492,44 +3493,51 @@ const LabelPrinter = ({ products, onClose, initialProduct = null, initialQty = 1
   };
 
   const generateLabelHTML = (info, copies) => {
-    // Barcode: use CODE128 via JsBarcode CDN
-    const { wMm, hMm } = labelSize;
-    const barcodeHeightPx = Math.max(16, Math.round(hMm * 0.5));
-    const labelsArr = Array.from({ length: copies }).map((_, i) => `
-      <div class="label" id="lbl${i}">
-        <div class="shop-name">${localStorage.getItem('shopName') || 'FashionPro'}</div>
-        <div class="prod-name">${info.name}</div>
-        <div class="sku">SKU: ${info.sku}</div>
-        <div class="barcode-wrap">
-          <svg class="barcode" id="bc${i}"></svg>
-        </div>
-        <div class="price-row">
-          ${info.discounted
-            ? `<span class="mrp">MRP ₹${info.mrp}</span><span class="rate">₹${info.rate}</span>`
-            : `<span class="rate only">₹${info.rate}</span>`
-          }
-        </div>
+  // Barcode: use CODE128 via JsBarcode CDN
+  const { wMm, hMm } = labelSize;
+  const barcodeHeightPx = Math.max(16, Math.round(hMm * 0.5));
+  
+  // Create label divs with SIZE now included ✨ NEW FEATURE
+  const labelsArr = Array.from({ length: copies }).map((_, i) => `
+    <div class="label" id="lbl${i}">
+      <div class="shop-name">${localStorage.getItem('shopName') || 'FashionPro'}</div>
+      <div class="prod-name">${info.name}</div>
+      ${info.size ? `<div class="size-display"><strong>Size:</strong> ${info.size}</div>` : ''}
+      <div class="sku">SKU: ${info.sku}</div>
+      <div class="barcode-wrap">
+        <svg class="barcode" id="bc${i}"></svg>
       </div>
-    `).join('');
+      <div class="price-row">
+        ${info.discounted
+          ? `<span class="mrp">MRP ₹${info.mrp}</span><span class="rate">₹${info.rate}</span>`
+          : `<span class="rate only">₹${info.rate}</span>`
+        }
+      </div>
+    </div>
+  `).join('');
+ 
+  // FIX: Pad short SKU codes (like "J") so barcodes are thick enough to scan
+  const barcodeValue = info.size 
+    ? `${(info.sku || info.name.substring(0,8)).replace(/[^a-zA-Z0-9]/g, '')}:${info.size}`
+      .substring(0, 25)
+    : (info.sku || info.name.substring(0,12).replace(/\s/g,''))
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .padStart(5, '0');
 
-    // FIX: Pad short SKU codes (like "J") so barcodes are thick enough to scan
-    const barcodeValue = (info.sku || info.name.substring(0,12).replace(/\s/g,''))
-      .replace(/[^a-zA-Z0-9]/g, '')  // remove special chars
-      .padStart(5, '0');              // pad to min 5 chars: "J" → "0000J"
-    
-    const barcodeInits = Array.from({ length: copies }).map((_, i) => `
-      JsBarcode("#bc${i}", "${barcodeValue}", {
-        format: "CODE128",
-        width: 1.3,
-        height: ${barcodeHeightPx},
-        displayValue: false,
-        margin: 0,
-        background: "#ffffff",
-        lineColor: "#000000",
-      });
-    `).join('\n');
-
-    return `<!DOCTYPE html>
+  
+  const barcodeInits = Array.from({ length: copies }).map((_, i) => `
+    JsBarcode("#bc${i}", "${barcodeValue}", {
+      format: "CODE128",
+      width: 1.3,
+      height: ${barcodeHeightPx},
+      displayValue: false,
+      margin: 0,
+      background: "#ffffff",
+      lineColor: "#000000",
+    });
+  `).join('\n');
+ 
+  return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8"/>
@@ -3537,8 +3545,8 @@ const LabelPrinter = ({ products, onClose, initialProduct = null, initialQty = 1
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family: Arial, sans-serif; background: white; }
-  .page { display: flex; flex-wrap: wrap; gap: 2mm; padding: 2mm; }
+  body { font-family: Arial, sans-serif; background: white; margin-top: -20mm; }
+  .page { display: block; width: ${wMm}mm; margin: 0; padding: 0; }
   .label {
     width: ${wMm}mm;
     height: ${hMm}mm;
@@ -3550,10 +3558,27 @@ const LabelPrinter = ({ products, onClose, initialProduct = null, initialQty = 1
     justify-content: space-between;
     overflow: hidden;
     page-break-inside: avoid;
+    page-break-after: always;
+    box-sizing: border-box;
     background: #ffffff;
+    margin: 0;
   }
   .shop-name { font-size: 7pt; font-weight: bold; color: #333; text-align: center; letter-spacing: 0.5px; text-transform: uppercase; }
-  .prod-name { font-size: ${fontPt.name}pt; font-weight: ${fontBold.name ? "bold" : "normal"}; color: #111; text-align: center; line-height: 1.2; max-height: ${Math.round(hMm * 0.32)}mm; overflow: hidden; }
+  .prod-name { font-size: ${fontPt.name}pt; font-weight: ${fontBold.name ? "bold" : "normal"}; color: #111; text-align: center; line-height: 1.2; max-height: ${Math.round(hMm * 0.25)}mm; overflow: hidden; }
+  
+  /* ✨ NEW: Size display styling - Green highlight for size */
+  .size-display { 
+    font-size: 10pt; 
+    font-weight: bold; 
+    color: #059669; 
+    text-align: center; 
+    margin: 1mm 0;
+    padding: 1mm 2mm;
+    background: #ecfdf5;
+    border-radius: 3px;
+    letter-spacing: 0.5px;
+  }
+  
   .sku { font-size: ${fontPt.sku}pt; font-weight: ${fontBold.sku ? "bold" : "normal"}; color: #666; text-align: center; }
   .barcode-wrap { width: 100%; display: flex; justify-content: center; background: #ffffff; }
   .barcode { max-width: ${Math.round(wMm * 0.88)}mm; background: #ffffff; }
@@ -3561,11 +3586,18 @@ const LabelPrinter = ({ products, onClose, initialProduct = null, initialQty = 1
   .mrp { font-size: ${fontPt.mrp}pt; color: #9ca3af; font-weight: ${fontBold.mrp ? "bold" : "normal"}; }
   .rate { font-size: ${fontPt.price}pt; font-weight: ${fontBold.price ? "bold" : "normal"}; color: #000; }
   .rate.only { font-size: ${fontPt.price + 2}pt; }
+  
   @media print {
-    @page { margin: 0; size: ${wMm}mm auto; }
-    body { margin: 0; }
-    .page { gap: 1mm; padding: 1mm; }
-    .label { border: 0.3px solid #aaa; }
+    @page { margin: 0; padding: 0; size: auto; }
+    body { margin: 0; padding: 0; }
+    .page { margin: 0; padding: 0; }
+    .label { 
+      border: 0.3px solid #aaa; 
+      page-break-inside: avoid;
+      page-break-after: avoid;
+      margin: 0 0 2mm 0;
+      padding: 2mm 2.5mm 1.5mm;
+    }
   }
 </style>
 </head>
@@ -3574,20 +3606,18 @@ const LabelPrinter = ({ products, onClose, initialProduct = null, initialQty = 1
 <script>
 window.onload = function() {
   ${barcodeInits}
-  // Barcode render ho chuke — ab hi print dialog kholo (isi script se, taaki koi
-  // dusra onload isko overwrite na kare — pehle yeh bug tha jiski wajah se
-  // barcode kabhi dikhta tha kabhi nahi).
+  // Barcode render ho chuke — ab hi print dialog kholo
   setTimeout(function() {
     window.focus();
     window.print();
   }, 150);
 };
-// Print dialog band hote hi tab apne aap band ho jaaye — dukaan mein tabs jama nahi honge
+// Print dialog band hote hi tab apne aap band ho jaaye
 window.onafterprint = function() { window.close(); };
 </script>
 </body>
 </html>`;
-  };
+};
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
