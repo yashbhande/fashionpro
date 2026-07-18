@@ -2067,19 +2067,17 @@ const BillHistory = ({ sales, setSales, products, setProducts, customers, setCus
     if (minAmt) base = base.filter(s => getTotal(s) >= +minAmt);
     if (maxAmt) base = base.filter(s => getTotal(s) <= +maxAmt);
 
-    // When search active, keep search relevance order; otherwise apply sortBy
-    if (!searchText.trim()) {
-      base.sort((a, b) => {
-        if (sortBy === "date_desc")   return getFullDate(b).localeCompare(getFullDate(a));
-        if (sortBy === "date_asc")    return getFullDate(a).localeCompare(getFullDate(b));
-        if (sortBy === "bill_desc")   return parseInt((b.billNo||"0").replace(/\D/g,""),10) - parseInt((a.billNo||"0").replace(/\D/g,""),10);
-        if (sortBy === "bill_asc")    return parseInt((a.billNo||"0").replace(/\D/g,""),10) - parseInt((b.billNo||"0").replace(/\D/g,""),10);
-        if (sortBy === "amount_desc") return getTotal(b) - getTotal(a);
-        if (sortBy === "amount_asc")  return getTotal(a) - getTotal(b);
-        if (sortBy === "customer")    return (a.customer||"").localeCompare(b.customer||"");
-        return getFullDate(b).localeCompare(getFullDate(a));
-      });
-    }
+    // Always apply sortBy - search only filters, doesn't affect order
+    base.sort((a, b) => {
+      if (sortBy === "date_desc")   return getFullDate(b).localeCompare(getFullDate(a));
+      if (sortBy === "date_asc")    return getFullDate(a).localeCompare(getFullDate(b));
+      if (sortBy === "bill_desc")   return parseInt((b.billNo||"0").replace(/\D/g,""),10) - parseInt((a.billNo||"0").replace(/\D/g,""),10);
+      if (sortBy === "bill_asc")    return parseInt((a.billNo||"0").replace(/\D/g,""),10) - parseInt((b.billNo||"0").replace(/\D/g,""),10);
+      if (sortBy === "amount_desc") return getTotal(b) - getTotal(a);
+      if (sortBy === "amount_asc")  return getTotal(a) - getTotal(b);
+      if (sortBy === "customer")    return (a.customer||"").localeCompare(b.customer||"");
+      return getFullDate(b).localeCompare(getFullDate(a));
+    });
     return base;
   };
 
@@ -2259,7 +2257,7 @@ const BillHistory = ({ sales, setSales, products, setProducts, customers, setCus
           <div style={{ fontSize:48, marginBottom:12 }}>🧾</div>
           <p style={{ fontSize:15, fontWeight:600 }}>Koi bill nahi mila</p>
         </div>
-      ) : Object.keys(grouped).sort((a,b)=>b.localeCompare(a)).map(date => (
+      ) : Object.keys(grouped).sort((a,b) => new Date(b) - new Date(a)).map(date => (
         <div key={date} style={{ marginBottom:22 }}>
           <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
             <div style={{ fontSize:12.5, fontWeight:700, color:"#6b7280", background:"#f3f4f6", padding:"4px 12px", borderRadius:18 }}>{dateLabel(date)}</div>
@@ -2267,7 +2265,11 @@ const BillHistory = ({ sales, setSales, products, setProducts, customers, setCus
             <span style={{ fontSize:11.5, color:"#9ca3af", fontWeight:600 }}>{grouped[date].length} bills • ₹{grouped[date].reduce((a,s)=>a+getCurrentVersion(s).total,0).toLocaleString()}</span>
           </div>
           <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-            {grouped[date].map(sale => {
+            {grouped[date].sort((a,b) => {
+              const aBillNum = parseInt((a.billNo||"0").replace(/\D/g,""),10);
+              const bBillNum = parseInt((b.billNo||"0").replace(/\D/g,""),10);
+              return bBillNum - aBillNum;
+            }).map(sale => {
               const v = getCurrentVersion(sale);
               const hasVersions = (sale.versions?.length||1) > 1;
               const cardSummary = calcBillSummary(v.items ? v : sale);
@@ -5080,10 +5082,9 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
   };
 
   const finalizeSale = async () => {
-    setSaleInProgress(true); // BUG29 FIX: lock button immediately
-    // BUG24 FIX: billCounter race condition — Firebase transaction use karo
-    // Do log saath bill banayein toh same INV number nahi milega
+    setSaleInProgress(true);
     let finalBillCounter = billCounter;
+    
     try {
       const counterRef = doc(db, "meta", "billCounter");
       await runTransaction(db, async (txn) => {
@@ -5091,12 +5092,14 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
         finalBillCounter = snap.exists() ? (snap.data().value || billCounter) : billCounter;
         txn.set(counterRef, { value: finalBillCounter + 1 });
       });
+      setBillCounter(finalBillCounter + 1);
     } catch (e) {
-      // Offline ya error — local counter use karo (fallback)
+      console.warn("Firebase failed, using local:", e.message);
       finalBillCounter = billCounter;
+      setBillCounter(billCounter + 1);
     }
-    setBillCounter(finalBillCounter + 1); // sync local state (BUG29 fix: was setBillCounterState — wrong scope)
 
+    
     const billNo = `INV-${String(finalBillCounter).padStart(3, "0")}`;
     const itemsWithEff = cart.map(item => ({
       ...item,
