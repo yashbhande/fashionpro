@@ -796,7 +796,7 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
               const effTotal = getEffTotal(item, cv);
               const perUnit = item.qty > 0 ? Math.round(effTotal / item.qty) : 0;
               const actualPerUnit = Math.round((effTotal * salePayRatio) / Math.max(1, item.qty));
-              const settledOnItem = item.settledDisc || 0;
+              const settledOnItem = item.settledDiscRs || 0;
               const discCell = iDiscRs > 0
                 ? { label: item.itemDiscountType === "%" ? `${item.itemDiscount}% = ₹${iDiscRs}` : `₹${iDiscRs}`, color:"#059669", sub:"item disc" }
                 : bDiscOnItem > 0 ? { label: `₹${bDiscOnItem}`, color:"#7c3aed", sub:"bill disc" } : null;
@@ -1037,9 +1037,9 @@ const GlobalInvoiceDrawer = ({ sale, onClose, products, isAdmin, shopName, setAc
                   {s.settledTotal > 0 && (
                     <div>
                       <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:"#f59e0b" }}><span>📉 Customer ne kam diya</span><span style={{ fontWeight:700 }}>−₹{s.settledTotal}</span></div>
-                      {cvItems.filter(it=>(it.settledDisc||0)>0).map((it,i)=>(
+                      {cvItems.filter(it=>(it.settledDiscRs||0)>0).map((it,i)=>(
                         <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"#9ca3af", paddingLeft:14 }}>
-                          <span>↳ {it.name}</span><span style={{ color:"#f59e0b" }}>−₹{it.settledDisc}</span>
+                          <span>↳ {it.name}</span><span style={{ color:"#f59e0b" }}>−₹{it.settledDiscRs}</span>
                         </div>
                       ))}
                     </div>
@@ -1948,22 +1948,24 @@ const pushVersion = (sale, newV) => {
 const calcBillSummary = (billOrVersion) => {
   if (!billOrVersion) return { items: [], mrpSubtotal: 0, rateSubtotal: 0, mrpDiscount: 0, itemDiscTotal: 0, billDiscAmt: 0, legacyDisc: 0, settledTotal: 0, totalDiscount: 0, taxAmt: 0, total: 0, received: 0, totalSavings: 0 };
   const items = (billOrVersion.items || []).filter(Boolean);
-  // MRP subtotal = mrpPerPiece*qty if set, else price*qty
+  // ✅ FIX: MRP subtotal = mrpPerPiece*qty if set, else price*qty (items without MRP also counted!)
   const mrpSubtotal = billOrVersion.subtotal ||
-    items.reduce((a, it) => a + ((it.mrpPerPiece > 0 ? it.mrpPerPiece : it.price) * (it.qty || 1)), 0);
+    items.reduce((a, it) => a + ((it.mrpPerPiece > 0 ? it.mrpPerPiece : (it.price || 0)) * (it.qty || 1)), 0);
   // Rate subtotal = price*qty (our selling rate)
   const rateSubtotal = billOrVersion.rateSubtotal ||
     items.reduce((a, it) => a + it.price * (it.qty || 1), 0);
-  // MRP discount = difference between MRP and rate
-  const mrpDiscount = items.reduce((a, it) =>
-    a + (it.mrpPerPiece > it.price ? (it.mrpPerPiece - it.price) * (it.qty || 1) : 0), 0);
+  // ✅ FIX: MRP discount = only if mrpPerPiece > 0 AND > price
+  const mrpDiscount = items.reduce((a, it) => {
+    if (!it.mrpPerPiece || it.mrpPerPiece <= 0) return a;
+    return a + (it.mrpPerPiece > it.price ? (it.mrpPerPiece - it.price) * (it.qty || 1) : 0);
+  }, 0);
   // Item-level discounts
   const itemDiscTotal = billOrVersion.itemDiscountTotal ||
     items.reduce((a, it) => a + (it.itemDiscountRs || 0), 0);
   // Bill-level discount
   const billDiscAmt = billOrVersion.billDiscount || 0;
   // Settlement (customer paid less) — track separately, NOT part of "savings/discount"
-  const settledTotal = items.reduce((a, it) => a + (it.settledDisc || 0), 0);
+  const settledTotal = items.reduce((a, it) => a + (it.settledDiscRs || 0), 0);
   // BUG15 FIX: legacyDisc logic tight karo — new bills pe accidentally trigger nahi hona chahiye
   // Old bills: itemDiscountTotal field exist hi nahi karta (undefined), billDiscount bhi nahi
   // New bills: itemDiscountTotal = 0 possible hai (e.g. sirf bill discount tha) — isliye
@@ -2628,7 +2630,7 @@ const generatePDFBlob = async (bill, shopName) => {
     const mrpTotal  = mrpPc > 0 ? mrpPc * qty : rateTotal;
     const mrpSaveAmt = mrpPc > ratePc ? (mrpPc - ratePc) * qty : 0;
     const iDiscRs   = item.itemDiscountRs || 0;
-    const settled   = item.settledDisc || 0;
+    const settled   = item.settledDiscRs || 0;
     const effTotal  = item.effectiveTotal !== undefined
       ? item.effectiveTotal
       : Math.max(0, rateTotal - iDiscRs - settled);
@@ -2640,7 +2642,7 @@ const generatePDFBlob = async (bill, shopName) => {
   const mrpSavings    = itemData.reduce((a, d) => a + d.mrpSaveAmt, 0);
   const settledInPdf  = itemData.reduce((a, d) => a + d.settled, 0);
   // BUG6 FIX: itemDiscTotal mein settled double count ho raha tha — hatao
-  // settledDisc ek alag shortfall hai, actual discount nahi
+  // settledDiscRs ek alag shortfall hai, actual discount nahi
   const itemDiscTotal = itemData.reduce((a, d) => a + d.iDiscRs, 0);
   const billDiscAmt   = bill.billDiscount || 0;
   const legacyDisc    = (!bill.itemDiscountTotal && !bill.billDiscount && bill.discount) ? Math.max(0, bill.discount - settledInPdf) : 0;
@@ -2887,7 +2889,7 @@ const buildBillHTML = (bill, shopName) => {
     const mrpTotal  = mrpPc > 0 ? mrpPc * qty : rateTotal;
     const mrpSaveAmt = mrpPc > ratePc ? (mrpPc - ratePc) * qty : 0;
     const iDiscRs   = item.itemDiscountRs || 0;
-    const settled   = item.settledDisc || 0;
+    const settled   = item.settledDiscRs || 0;
     const effTotal  = item.effectiveTotal !== undefined
       ? item.effectiveTotal
       : Math.max(0, rateTotal - iDiscRs - settled);
@@ -3123,10 +3125,11 @@ const BillActions = ({ bill, shopName, onClose, showNewBill }) => {
       const ratePc = item.price;
       const rateTotal = ratePc * qty;
       const iDiscRs = item.itemDiscountRs || 0;
-      const settled = item.settledDisc || 0;
+      const settled = item.settledDiscRs || 0;
       const effTotal = item.effectiveTotal !== undefined ? item.effectiveTotal : Math.max(0, rateTotal - iDiscRs - settled);
       const billDiscLine = Math.max(0, Math.round(rateTotal - iDiscRs - settled - effTotal));
-      const mrpLineTotal = mrpPc > 0 ? mrpPc * qty : rateTotal;
+      // ✅ FIX: mrpLineTotal = 0 for manual items, not rateTotal!
+      const mrpLineTotal = mrpPc > 0 ? mrpPc * qty : 0;
 
       t += `\n${i+1}. *${item.name}*`;
       if (item.sku) t += ` [${item.sku}]`;
@@ -4786,6 +4789,7 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
   // Quick-add row
   const [quickName, setQuickName] = useState("");
   const [quickPrice, setQuickPrice] = useState("");
+  const [quickMRP, setQuickMRP] = useState(""); // ✅ Optional MRP for manual items
   const [quickQty, setQuickQty] = useState(1);
   const [codeSearch, setCodeSearch] = useState("");
   const [showCodeDrop, setShowCodeDrop] = useState(false);
@@ -4880,9 +4884,9 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
       color: quickColor || "-",
       qty: +quickQty || 1,
       price: +quickPrice,
-      // MRP info — from size variant if available, else from product
-      mrpPerPiece: selectedVariant?.mrpPerPiece || (matchedProduct?.mrp > 0 && matchedProduct?.piecesPerPack > 0 ? Math.round(matchedProduct.mrp / matchedProduct.piecesPerPack) : 0),
-      mrp: selectedVariant?.mrp || matchedProduct?.mrp || 0,
+      // ✅ FIX: MRP info — use manual MRP if provided, else from size variant, else from product
+      mrpPerPiece: quickMRP && +quickMRP > 0 ? +quickMRP : (selectedVariant?.mrpPerPiece || (matchedProduct?.mrp > 0 && matchedProduct?.piecesPerPack > 0 ? Math.round(matchedProduct.mrp / matchedProduct.piecesPerPack) : 0)),
+      mrp: quickMRP && +quickMRP > 0 ? +quickMRP * (+quickQty || 1) : (selectedVariant?.mrp || matchedProduct?.mrp || 0),
       piecesPerBox: selectedVariant?.piecesPerBox || matchedProduct?.piecesPerPack || 1,
     };
     // BUG31 FIX: same name+size+color already cart mein hai? confirm karo
@@ -4898,7 +4902,7 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
       return;
     }
     setCart(prev => [...prev, newItem]);
-    setQuickName(""); setQuickPrice(""); setQuickQty(1); setQuickSize(""); setQuickColor(""); setSearch(""); setSelectedProduct(null); setSelectedVariant(null);
+    setQuickName(""); setQuickPrice(""); setQuickMRP(""); setQuickQty(1); setQuickSize(""); setQuickColor(""); setSearch(""); setSelectedProduct(null); setSelectedVariant(null);
     showToast("Cart mein add ho gaya! ✓");
     searchRef.current?.focus();
   };
@@ -4958,14 +4962,17 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
   // • Bill-level discount → sirf un items pe jinhone item discount NAHI liya
   // ─────────────────────────────────────────────────────────────
 
-  // Each item's MRP total — use mrpPerPiece if set, else selling price
-  const itemMRP = (item) => (item.mrpPerPiece > 0 ? item.mrpPerPiece : item.price) * item.qty;
+  // ✅ FIX: Each item's MRP total — use mrpPerPiece if set, else 0 (manual items = 0 MRP!)
+  const itemMRP = (item) => (item.mrpPerPiece > 0 ? item.mrpPerPiece : 0) * item.qty;
 
   // Each item's rate total (our selling price)
   const itemRate = (item) => item.price * item.qty;
 
-  // MRP discount on an item (difference between MRP and our rate)
-  const itemMRPDisc = (item) => item.mrpPerPiece > item.price ? (item.mrpPerPiece - item.price) * item.qty : 0;
+  // ✅ FIX: MRP discount on an item (only if mrpPerPiece > 0 AND > our rate)
+  const itemMRPDisc = (item) => {
+    if (!item.mrpPerPiece || item.mrpPerPiece <= 0) return 0;
+    return item.mrpPerPiece > item.price ? (item.mrpPerPiece - item.price) * item.qty : 0;
+  };
 
   // Resolve item discount in ₹ (supports ₹, % and =₹ target price mode)
   // Item discount is applied on top of selling price (rate), not MRP
@@ -5105,7 +5112,7 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
       ...item,
       itemDiscountRs: resolveItemDisc(item),
       effectiveTotal: getItemEffectiveTotal(item),
-      settledDisc: settleAmounts[item.cartItemId] || 0,
+      settledDiscRs: settleAmounts[item.cartItemId] || 0,
     }));
     const v0 = {
       versionNo: 1, type: "original",
@@ -5405,6 +5412,10 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
             <div>
               <label className="label">Rate ₹ *</label>
               <input className="input" type="number" onWheel={e=>e.target.blur()} value={quickPrice} onChange={e => setQuickPrice(e.target.value)} placeholder="0" onKeyDown={e => e.key === "Enter" && addToCart()} />
+            </div>
+            <div>
+              <label className="label">MRP ₹ <span style={{ color: "#d1d5db", fontWeight: 400 }}>(opt.)</span></label>
+              <input className="input" type="number" onWheel={e=>e.target.blur()} value={quickMRP} onChange={e => setQuickMRP(e.target.value)} placeholder="optional" onKeyDown={e => e.key === "Enter" && addToCart()} />
             </div>
             <div>
               <label className="label">Qty</label>
@@ -6066,7 +6077,7 @@ const Billing = ({ products, setProducts, sales, setSales, customers, setCustome
                 const rateTotal = ratePc * qty;
                 const mrpSaving = mrpPc > ratePc ? (mrpPc - ratePc) * qty : 0;
                 const iDiscRs = item.itemDiscountRs || 0;
-                const settled = item.settledDisc || 0;
+                const settled = item.settledDiscRs || 0;
                 const effTotal = item.effectiveTotal !== undefined ? item.effectiveTotal : (rateTotal - iDiscRs - settled);
                 const billDiscOnItem = Math.max(0, Math.round(rateTotal - iDiscRs - settled - effTotal));
                 const hasAnyDisc = mrpSaving > 0 || iDiscRs > 0 || billDiscOnItem > 0 || settled > 0;
@@ -6928,7 +6939,7 @@ const Customers = ({ customers, setCustomers, sales, showToast, isAdmin, highlig
                 const rateTotal = ratePc * qty;
                 const mrpSaving = mrpPc > ratePc ? (mrpPc - ratePc) * qty : 0;
                 const iDiscRs = item.itemDiscountRs || 0;
-                const settled = item.settledDisc || 0;
+                const settled = item.settledDiscRs || 0;
                 const afterDisc = rateTotal - iDiscRs - settled;
                 const hasMRP = mrpPc > ratePc;
                 const isLast = i === (openBill.items.length - 1);
@@ -7502,7 +7513,7 @@ const MarginAnalysis = ({ sales, products, setGlobalInvoiceSale }) => {
         effTotal = item.effectiveTotal;
       } else {
         const iDiscRs = item.itemDiscountRs || 0;
-        const settled = item.settledDisc || 0;
+        const settled = item.settledDiscRs || 0;
         const rateTotal = item.price * qty;
         // For bill discount: use proportional share only as last resort
         const proportional = itemRateSum > 0 ? Math.round(cvTotal * itemRateTotals[idx] / itemRateSum) : rateTotal;
@@ -7823,7 +7834,7 @@ const ProductSearch = ({ products, sales, purchases, isAdmin, setActiveTab, setI
         const qty = it.qty || 1;
         const ratePc = it.price || 0;
         const iDiscRs = it.itemDiscountRs || 0;
-        const settled = it.settledDisc || 0;
+        const settled = it.settledDiscRs || 0;
         // BUG7 FIX: effectiveTotal stored value use karo — proportional share galat tha
         // Proportional formula: discount unevenly apply hone pe item ka revenue galat distribute hota tha
         const effTotal = it.effectiveTotal !== undefined
